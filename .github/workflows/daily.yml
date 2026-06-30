@@ -1,0 +1,57 @@
+name: 创业板每日监测
+
+# 仅通过 workflow_dispatch 触发（由 cron-job.org 定时调用 GitHub API）
+# cron-job.org 配置方法详见 README.md
+on:
+  workflow_dispatch:
+    inputs:
+      no_push:
+        description: "跳过 Bark 推送（true/false）"
+        default: "false"
+        required: false
+
+permissions:
+  contents: write       # 允许 commit 回仓库
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 需要完整历史，避免 force-push
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run monitor
+        env:
+          LIXINGER_TOKEN: ${{ secrets.LIXINGER_TOKEN }}
+          QIEMAN_KEY:     ${{ secrets.QIEMAN_KEY }}
+          BARK_KEY:       ${{ secrets.BARK_KEY }}
+          DASHBOARD_URL:  ${{ secrets.DASHBOARD_URL }}
+        run: |
+          NO_PUSH="${{ github.event.inputs.no_push }}"
+          if [ "$NO_PUSH" = "true" ]; then
+            python src/main.py --no-push
+          else
+            python src/main.py
+          fi
+
+      - name: Commit updated data
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/history.csv state.json docs/data.json ledger.csv
+          # 仅在有变更时提交
+          git diff --cached --quiet || git commit -m "chore: 自动更新监测数据 $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git push

@@ -1,0 +1,9 @@
+start_date: "2023-04-24"        # 本轮建仓起始日
+initial_capital: 2000000        # 初始本金（元）
+total_fen: 150                  # 总份数
+cash_rate_annual: 0.02          # 货基/无风险年化利率（夏普 & 净值计息用）
+benchmark_code: "000300"        # 基准：沪深300
+chinext_code: "399006"          # 创业板指
+run_hour_utc: 8                 # 每日运行时间 UTC（北京16:00收盘后约8:30 UTC+8=0:30 UTC次日，或根据需求调整）
+warn_band_pp: 2                 # 临近预警带宽（百分点），如 PB分位 12% 时预警 T3(<10%)
+history_years: 11               # 拉取历史年数（≥10年，留冗余）

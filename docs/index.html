@@ -1,0 +1,2107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>创业板大周期监测</title>
+<style>
+  :root {
+    --bg:          #f5f5f7;
+    --bg2:         #ffffff;
+    --surface:     rgba(255,255,255,0.72);
+    --surface-solid:#ffffff;
+    --surface2:    #ececed;
+    --border:      rgba(0,0,0,0.08);
+    --border2:     rgba(0,0,0,0.06);
+    --text:        #1d1d1f;
+    --text2:       rgba(0,0,0,0.56);
+    --text3:       rgba(0,0,0,0.38);
+    --blue:        #0071e3;
+    --green:       #11a64a;
+    --red:         #e0392b;
+    --orange:      #e08600;
+    --yellow:      #c79100;
+    --purple:      #8e54d6;
+    --shadow-sm:   0 1px 2px rgba(0,0,0,.05), 0 4px 14px rgba(0,0,0,.04);
+    --shadow-md:   0 2px 6px rgba(0,0,0,.06), 0 14px 40px rgba(0,0,0,.07);
+    --font:        -apple-system,BlinkMacSystemFont,'SF Pro Display','Helvetica Neue',Arial,sans-serif;
+  }
+  *,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+  html {
+    color:var(--text); font-family:var(--font);
+    -webkit-font-smoothing:antialiased;
+    background:
+      radial-gradient(1100px 560px at 50% -8%, #ffffff 0%, rgba(255,255,255,0) 62%),
+      linear-gradient(180deg, #f7f7f9 0%, #ececee 52%, #e6e6e9 100%);
+    background-attachment:fixed;
+  }
+  body { min-height:100vh; padding-bottom:40px; }
+
+  /* ── 顶部状态栏 ── */
+  .topbar {
+    position:sticky; top:0; z-index:100;
+    background:rgba(245,245,247,0.72);
+    -webkit-backdrop-filter:saturate(180%) blur(20px);
+    backdrop-filter:saturate(180%) blur(20px);
+    border-bottom:1px solid var(--border);
+    padding:14px 20px;
+    display:flex; align-items:center; justify-content:space-between;
+    gap:12px;
+  }
+  .topbar-left { display:flex; align-items:center; gap:14px; }
+  .logo { font-size:15px; font-weight:700; letter-spacing:-0.3px; color:var(--text); }
+  .phase-badge {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:4px 10px; border-radius:20px;
+    font-size:12px; font-weight:600; letter-spacing:.3px;
+  }
+  .phase-badge.holding  { background:rgba(17,166,74,.12);  color:var(--green); }
+  .phase-badge.waiting  { background:rgba(224,134,0,.12);  color:var(--orange); }
+  .phase-badge .dot { width:6px; height:6px; border-radius:50%; background:currentColor;
+                       animation:pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .next-action { font-size:12px; color:var(--text2); max-width:340px; }
+  .topbar-right { font-size:11px; color:var(--text3); white-space:nowrap; }
+  .pending-badge {
+    display:inline-block; background:var(--orange); color:#000;
+    border-radius:10px; padding:2px 8px; font-size:11px; font-weight:700;
+    margin-left:8px;
+  }
+
+  /* ── 内容容器 ── */
+  .container { max-width:1320px; margin:0 auto; padding:24px 20px 0; }
+
+  /* ═══════════ Tier 1：距触发还差多少（Hero） ═══════════ */
+  .hero-card {
+    position:relative; overflow:hidden;
+    background:var(--surface);
+    -webkit-backdrop-filter:blur(24px) saturate(180%);
+    backdrop-filter:blur(24px) saturate(180%);
+    border:1px solid var(--border);
+    border-radius:24px;
+    box-shadow:var(--shadow-md);
+    padding:22px 26px 24px;
+    margin-bottom:18px;
+  }
+  .hero-eyebrow {
+    font-size:12px; font-weight:600; color:var(--text2);
+    letter-spacing:.4px; display:flex; align-items:center; justify-content:flex-end;
+  }
+  .gap-type {
+    font-size:12px; font-weight:600; color:var(--blue);
+    background:rgba(0,113,227,.10); border-radius:20px; padding:4px 12px;
+  }
+  /* 内嵌大数字的标题行 */
+  .gap-headline-inline {
+    display:flex; align-items:baseline; flex-wrap:wrap;
+    margin:12px 0 8px; gap:0 2px;
+  }
+  .gap-pre  { font-size:14px; color:var(--text2); font-weight:500; }
+  .gap-inline-num {
+    font-size:40px; font-weight:700; letter-spacing:-1.5px; line-height:1.05;
+    margin:0 1px;
+  }
+  .gap-post { font-size:16px; color:var(--text); font-weight:600; }
+  /* fallback（无法内嵌时）仍用大块数字 */
+  .gap-big {
+    font-size:44px; font-weight:700; letter-spacing:-1.5px; line-height:1.05;
+    margin:12px 0 6px; color:var(--text);
+  }
+  .gap-big .gap-big-pre {
+    font-size:16px; font-weight:600; color:var(--text2);
+    margin-right:8px; letter-spacing:0; vertical-align:middle;
+  }
+  .gap-headline { font-size:15px; font-weight:600; color:var(--text); line-height:1.45; margin-bottom:6px; }
+  .gap-note { font-size:13px; color:var(--text2); margin-top:4px; }
+  .gap-bar { height:5px; background:var(--surface2); border-radius:3px; margin:16px 0 8px; overflow:hidden; }
+  .gap-bar-fill { height:100%; border-radius:3px; transition:width .6s cubic-bezier(.4,0,.2,1); }
+  .gap-current { font-size:12px; color:var(--text3); }
+  .gap-empty { color:var(--text3); font-size:13px; padding:10px 0; }
+
+  /* ═══════════ Tier 2：当日收益 > 当前浮盈 > PB分位 ═══════════ */
+  .tier2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; }
+  .stat-card {
+    background:var(--surface);
+    -webkit-backdrop-filter:blur(20px) saturate(180%);
+    backdrop-filter:blur(20px) saturate(180%);
+    border:1px solid var(--border);
+    border-radius:18px;
+    box-shadow:var(--shadow-sm);
+    padding:18px 20px;
+    transition:transform .18s ease, box-shadow .18s ease;
+  }
+  .stat-card:hover { transform:translateY(-2px); box-shadow:var(--shadow-md); }
+  .stat-label { font-size:12px; font-weight:500; color:var(--text2); letter-spacing:.3px; margin-bottom:9px; }
+  .stat-value { font-size:30px; font-weight:700; letter-spacing:-.6px; line-height:1; color:var(--text); }
+  .stat-sub { font-size:12px; color:var(--text3); margin-top:7px; }
+  .t2-daily { grid-column:1/-1; }
+  .daily-split { display:flex; align-items:center; }
+  .daily-left  { flex:1; min-width:0; padding-right:18px; border-right:1px solid var(--border); }
+  .daily-right { flex:0 0 auto; padding-left:18px; min-width:100px; }
+  .daily-main { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+  .daily-yuan { font-size:36px; font-weight:700; letter-spacing:-1px; line-height:1; color:var(--text); }
+  .daily-pct { font-size:17px; font-weight:600; }
+  .profit-yuan { font-size:13px; font-weight:600; margin-top:5px; }
+  /* ── 温度计卡片 ── */
+  .temp-row  { display:flex; gap:20px; margin-top:8px; align-items:flex-end; }
+  .temp-item { display:flex; flex-direction:column; gap:4px; }
+  .temp-lbl  { font-size:11px; color:var(--text3); }
+  .temp-val  { font-size:26px; font-weight:700; letter-spacing:-.5px; line-height:1; }
+
+  /* ═══════════ Tier 3：CAGR > 最大回撤 > 持仓份数（次要紧凑） ═══════════ */
+  .tier3 { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:18px; }
+  .mini-card {
+    background:rgba(255,255,255,0.5);
+    border:1px solid var(--border2);
+    border-radius:14px;
+    padding:13px 15px;
+  }
+  .mini-label { font-size:11px; font-weight:500; color:var(--text3); margin-bottom:7px; }
+  .mini-value { font-size:19px; font-weight:600; letter-spacing:-.3px; line-height:1; color:var(--text); }
+  .mini-sub { font-size:10px; color:var(--text3); margin-top:6px; }
+  .mini-track { height:3px; background:var(--surface2); border-radius:2px; margin-top:8px; overflow:hidden; max-width:84px; }
+  .mini-fill { height:100%; background:var(--blue); border-radius:2px; transition:width .4s ease; }
+
+  /* ── 图表区 ── */
+  .chart-section { margin-bottom:16px; }
+  .chart-card {
+    background:var(--surface);
+    -webkit-backdrop-filter:blur(20px) saturate(180%);
+    backdrop-filter:blur(20px) saturate(180%);
+    border:1px solid var(--border);
+    border-radius:18px;
+    box-shadow:var(--shadow-sm);
+    overflow:hidden;
+  }
+  .chart-header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 18px 0;
+  }
+  .chart-title { font-size:13px; font-weight:600; color:var(--text); }
+  .chart-sub   { font-size:11px; color:var(--text3); }
+  .chart-legend { display:flex; gap:14px; align-items:center; }
+  .legend-item { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--text2); }
+  .legend-dot { width:8px; height:8px; border-radius:50%; }
+
+  .chart-row {
+    display:grid; grid-template-columns:1fr 1fr;
+    gap:12px; margin-bottom:16px;
+  }
+  @media (max-width:720px) {
+    .chart-row { grid-template-columns:1fr; }
+    .gap-big   { font-size:40px; }
+    .daily-yuan { font-size:32px; }
+  }
+
+  /* ── 行动横幅（有待执行信号时出现） ── */
+  #action-banner {
+    border-radius:16px; margin-bottom:14px;
+    padding:16px 18px;
+    display:flex; align-items:center; gap:14px;
+  }
+  .ab-buy  { background:#c85000; color:#fff; }
+  .ab-sell { background:#b71c1c; color:#fff; }
+  .ab-icon { font-size:26px; flex-shrink:0; line-height:1; }
+  .ab-body { flex:1; min-width:0; }
+  .ab-title { font-size:16px; font-weight:700; margin-bottom:4px; }
+  .ab-detail { font-size:12px; opacity:.82; line-height:1.4; }
+  .ab-btn {
+    flex-shrink:0; white-space:nowrap;
+    background:rgba(255,255,255,.18); color:#fff;
+    border:1.5px solid rgba(255,255,255,.45);
+    border-radius:10px; padding:9px 16px;
+    font-size:13px; font-weight:700; cursor:pointer;
+  }
+  .ab-btn:active { background:rgba(255,255,255,.32); }
+
+  /* ── 图表时间范围按钮 ── */
+  .chart-ranges {
+    display:flex; flex-wrap:wrap; gap:5px;
+    padding:8px 14px 4px;
+  }
+  .rng-btn {
+    background:none; border:1px solid var(--border);
+    border-radius:6px; padding:3px 9px;
+    font-size:11px; color:var(--text3); cursor:pointer;
+    line-height:1.5; transition:background .12s,color .12s,border-color .12s;
+  }
+  .rng-btn:hover  { background:var(--surface2); color:var(--text); }
+  .rng-btn.active { background:var(--blue); border-color:var(--blue); color:#fff; }
+  /* 全屏按钮 */
+  .chart-fs-btn {
+    flex-shrink:0; background:none; border:none;
+    cursor:pointer; color:var(--text3);
+    font-size:15px; line-height:1;
+    padding:3px 6px; border-radius:5px; margin-left:6px;
+  }
+  .chart-fs-btn:hover { background:var(--surface2); color:var(--text); }
+  /* 全屏状态下撑满屏幕 */
+  .chart-card:fullscreen,
+  .chart-card:-webkit-full-screen {
+    border-radius:0 !important;
+    display:flex !important; flex-direction:column;
+    padding:10px; overflow:auto;
+    background:var(--bg) !important;
+  }
+  .chart-card:fullscreen > [id^=chart-],
+  .chart-card:-webkit-full-screen > [id^=chart-] {
+    flex:1 !important; height:auto !important; min-height:300px;
+  }
+
+  /* ── 预警区 ── */
+  .warn-card {
+    background:var(--surface);
+    -webkit-backdrop-filter:blur(20px) saturate(180%);
+    backdrop-filter:blur(20px) saturate(180%);
+    border:1px solid var(--border);
+    border-radius:18px; box-shadow:var(--shadow-sm);
+    overflow:hidden; margin-bottom:16px;
+  }
+  .warn-header { padding:14px 18px; font-size:13px; font-weight:600; color:var(--orange); }
+  .warn-list { padding:0 18px 14px; }
+  .warn-item {
+    font-size:12px; color:var(--orange);
+    padding:8px 12px; margin-bottom:6px;
+    background:rgba(224,134,0,0.08);
+    border-left:2px solid var(--orange);
+    border-radius:0 8px 8px 0;
+  }
+
+  /* ── 加载骨架 ── */
+  .skeleton { animation:shimmer 1.4s ease-in-out infinite; }
+  @keyframes shimmer {
+    0%,100% { opacity:.4 }
+    50%      { opacity:.8 }
+  }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width:4px; height:4px; }
+  ::-webkit-scrollbar-thumb { background:var(--surface2); border-radius:4px; }
+
+  /* ══════════════════════════════════════════
+     成交记录面板系统
+  ══════════════════════════════════════════ */
+
+  /* FAB 浮动按钮 */
+  .fab {
+    position:fixed; bottom:28px; right:24px; z-index:200;
+    width:56px; height:56px; border-radius:50%;
+    background:var(--blue); color:#fff; border:none;
+    font-size:26px; font-weight:300; line-height:1;
+    cursor:pointer; display:flex; align-items:center; justify-content:center;
+    box-shadow:0 6px 20px rgba(0,113,227,.36);
+    transition:transform .15s ease, box-shadow .15s ease;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .fab:active { transform:scale(.92); }
+  .fab .fab-badge {
+    position:absolute; top:-2px; right:-2px;
+    min-width:18px; height:18px; border-radius:9px;
+    background:var(--red); color:#fff;
+    font-size:10px; font-weight:700;
+    display:flex; align-items:center; justify-content:center; padding:0 4px;
+    border:2px solid var(--bg);
+  }
+
+  /* 遮罩 */
+  .panel-overlay {
+    position:fixed; inset:0; z-index:300;
+    background:rgba(0,0,0,.32);
+    -webkit-backdrop-filter:blur(6px);
+    backdrop-filter:blur(6px);
+    opacity:0; pointer-events:none;
+    transition:opacity .3s ease;
+  }
+  .panel-overlay.open { opacity:1; pointer-events:all; }
+
+  /* 面板主体 */
+  .ledger-panel {
+    position:fixed; bottom:0; left:0; right:0; z-index:400;
+    background:var(--surface-solid);
+    border-radius:22px 22px 0 0;
+    max-height:88vh;
+    display:flex; flex-direction:column;
+    transform:translateY(100%);
+    transition:transform .36s cubic-bezier(.32,.72,0,1);
+    box-shadow:0 -8px 40px rgba(0,0,0,.18);
+  }
+  .ledger-panel.open { transform:translateY(0); }
+
+  /* 拖动柄 */
+  .panel-handle {
+    width:36px; height:4px; border-radius:2px;
+    background:var(--surface2); margin:10px auto 0; flex-shrink:0;
+  }
+
+  /* 面板头 */
+  .panel-header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 20px 0; flex-shrink:0;
+  }
+  .panel-title { font-size:17px; font-weight:700; }
+  .panel-close {
+    width:30px; height:30px; border-radius:50%;
+    background:var(--surface2); border:none; color:var(--text2);
+    font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center;
+  }
+
+  /* Tab 栏 */
+  .tab-bar {
+    display:flex; border-bottom:1px solid var(--border);
+    padding:0 20px; margin-top:14px; flex-shrink:0;
+  }
+  .tab-btn {
+    flex:1; padding:10px 0; border:none; background:transparent;
+    color:var(--text2); font-size:13px; font-weight:500; cursor:pointer;
+    border-bottom:2px solid transparent; margin-bottom:-1px;
+    transition:color .15s, border-color .15s;
+  }
+  .tab-btn.active { color:var(--blue); border-bottom-color:var(--blue); }
+
+  /* Tab 内容 */
+  .tab-content { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+  .tab-pane { display:none; padding:16px 20px 32px; }
+  .tab-pane.active { display:block; }
+
+  /* 空状态 */
+  .empty-state {
+    text-align:center; color:var(--text3); padding:40px 0; font-size:13px;
+  }
+
+  /* 待执行信号卡片 */
+  .pending-card {
+    background:var(--surface2); border-radius:14px;
+    padding:14px 16px; margin-bottom:10px;
+    border-left:3px solid var(--green);
+  }
+  .pending-card .pc-type { font-size:12px; font-weight:700; color:var(--green); margin-bottom:4px; }
+  .pending-card .pc-detail { font-size:13px; color:var(--text); margin-bottom:10px; }
+  .pending-card .pc-meta { font-size:11px; color:var(--text2); margin-bottom:10px; }
+  .btn-sm {
+    padding:7px 14px; border-radius:8px; border:none;
+    font-size:12px; font-weight:600; cursor:pointer;
+  }
+  .btn-fill-sm { background:var(--green); color:#fff; }
+  .btn-text-sm { background:transparent; color:var(--text2); }
+
+  /* 新增表单 */
+  .form-section-title {
+    font-size:12px; font-weight:600; color:var(--text3);
+    letter-spacing:.5px; text-transform:uppercase;
+    margin:20px 0 10px;
+  }
+  .form-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .field { margin-bottom:12px; }
+  .field label { display:block; font-size:11px; color:var(--text2); margin-bottom:5px; }
+  .field input, .field select, .field textarea {
+    width:100%; padding:10px 12px;
+    background:var(--surface2); border:1px solid var(--border);
+    border-radius:10px; color:var(--text); font-size:14px;
+    font-family:var(--font); outline:none;
+    transition:border-color .15s;
+  }
+  .field input:focus, .field select:focus, .field textarea:focus {
+    border-color:var(--blue);
+  }
+  .field select option { background:var(--surface2); }
+  .action-buy    { color:var(--green) !important; }
+  .action-reduce { color:var(--orange) !important; }
+  .action-exit   { color:var(--red) !important; }
+
+  .btn-primary {
+    width:100%; padding:13px; background:var(--blue); color:#fff;
+    border:none; border-radius:12px; font-size:15px; font-weight:600;
+    cursor:pointer; margin-top:6px;
+    transition:opacity .15s;
+  }
+  .btn-primary:active { opacity:.8; }
+  .btn-secondary {
+    width:100%; padding:12px; background:var(--surface2); color:var(--text);
+    border:none; border-radius:12px; font-size:14px; font-weight:500;
+    cursor:pointer; margin-top:8px;
+  }
+  .btn-danger {
+    padding:6px 12px; background:rgba(224,57,43,.10); color:var(--red);
+    border:1px solid rgba(224,57,43,.25); border-radius:8px;
+    font-size:11px; font-weight:600; cursor:pointer;
+  }
+
+  /* 流水记录表 */
+  .ledger-list { margin-top:4px; }
+  .ledger-row {
+    display:grid; grid-template-columns:72px 52px 40px 64px 1fr auto;
+    gap:8px; align-items:center;
+    padding:10px 0; border-bottom:1px solid rgba(0,0,0,.06);
+    font-size:12px;
+  }
+  .ledger-row:last-child { border-bottom:none; }
+  .ledger-row .lr-date { color:var(--text2); font-variant-numeric:tabular-nums; }
+  .ledger-row .lr-action { font-weight:600; }
+  .ledger-row .lr-fen { color:var(--text2); text-align:right; }
+  .ledger-row .lr-price { font-variant-numeric:tabular-nums; text-align:right; }
+  .ledger-row .lr-note { color:var(--text3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ledger-row .lr-actions { display:flex; gap:6px; }
+  .btn-icon {
+    padding:4px 8px; border-radius:6px; border:none;
+    background:var(--surface2); color:var(--text2);
+    font-size:11px; cursor:pointer;
+  }
+  .badge-local {
+    display:inline-block; padding:1px 6px; border-radius:4px;
+    background:rgba(224,134,0,.14); color:var(--orange);
+    font-size:9px; font-weight:700; margin-left:4px;
+  }
+
+  /* 编辑行 */
+  .ledger-row.editing {
+    grid-template-columns:1fr;
+    background:var(--surface2); border-radius:10px;
+    padding:12px; margin:4px 0;
+  }
+  .edit-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:8px; }
+  .edit-actions { display:flex; gap:8px; }
+  .btn-save-edit {
+    flex:1; padding:8px; background:var(--blue); color:#fff;
+    border:none; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer;
+  }
+  .btn-cancel-edit {
+    padding:8px 16px; background:var(--surface2); color:var(--text2);
+    border:none; border-radius:8px; font-size:13px; cursor:pointer;
+  }
+
+  /* 设置页 */
+  .settings-desc { font-size:12px; color:var(--text2); margin-bottom:16px; line-height:1.6; }
+  .sync-status {
+    padding:10px 14px; border-radius:10px; font-size:12px; margin-top:12px;
+  }
+  .sync-status.ok  { background:rgba(17,166,74,.12);  color:var(--green); }
+  .sync-status.err { background:rgba(224,57,43,.12);  color:var(--red); }
+  .sync-status.ing { background:rgba(0,113,227,.12);  color:var(--blue); }
+
+  /* 操作日志 */
+  .log-entry {
+    border-radius:12px; padding:11px 14px; margin-bottom:8px;
+    border-left:3px solid var(--border); background:var(--surface2);
+  }
+  .log-entry.matched   { border-left-color:var(--green); }
+  .log-entry.unmatched { border-left-color:var(--orange); }
+  .le-date   { font-size:11px; color:var(--text3); margin-bottom:3px; }
+  .le-type   { font-size:13px; font-weight:700;  color:var(--text);  margin-bottom:3px; }
+  .le-detail { font-size:12px; color:var(--text2); line-height:1.5; }
+  .le-status { font-size:11px; font-weight:600; margin-top:6px; }
+
+  /* 导出区 */
+  .csv-preview {
+    font-size:11px; font-family:monospace; color:var(--text2);
+    background:var(--surface2); border:1px solid var(--border);
+    border-radius:8px; padding:10px; max-height:120px;
+    overflow-y:auto; white-space:pre; margin-top:8px;
+  }
+</style>
+</head>
+<body>
+
+<!-- ── 顶部状态栏 ── -->
+<header class="topbar">
+  <div class="topbar-left">
+    <span class="logo">创业板大周期</span>
+    <span class="phase-badge waiting" id="phase-badge">
+      <span class="dot"></span>
+      <span id="phase-label">加载中…</span>
+    </span>
+    <span class="next-action" id="next-action"></span>
+  </div>
+  <div class="topbar-right">
+    <span id="last-update"></span>
+    <span class="pending-badge" id="pending-badge" style="display:none"></span>
+  </div>
+</header>
+
+<div class="container">
+
+  <!-- ═══ 行动横幅（有待执行信号时显示）═══ -->
+  <div id="action-banner" style="display:none"></div>
+
+  <!-- ═══ Tier 1：下一次操作触发器（Hero） ═══ -->
+  <div class="hero-card" id="gap-hero">
+    <div class="hero-eyebrow"></div>
+    <div class="gap-empty" id="gap-body" style="margin-top:10px">加载中…</div>
+    <div id="data-freshness" style="display:none;font-size:11px;color:var(--text3);
+         margin-top:12px;padding-top:10px;border-top:1px solid var(--border)"></div>
+  </div>
+
+  <!-- ── 预警 ── -->
+  <div id="warn-section" style="display:none">
+    <div class="warn-card">
+      <div class="warn-header">⚠️ 临近预警</div>
+      <div class="warn-list" id="warn-list"></div>
+    </div>
+  </div>
+
+  <!-- ═══ Tier 2：收益概览 > PB分位 > 温度 ═══ -->
+  <div class="tier2">
+    <!-- 当日收益 + 当前浮盈（合并卡片） -->
+    <div class="stat-card t2-daily skeleton">
+      <div class="daily-split">
+        <div class="daily-left">
+          <div class="stat-label">当日收益</div>
+          <div class="daily-main">
+            <span class="daily-yuan" id="kpi-daily-yuan">--</span>
+            <span class="daily-pct" id="kpi-daily-pct">--</span>
+          </div>
+        </div>
+        <div class="daily-right">
+          <div class="stat-label">当前浮盈</div>
+          <div class="stat-value" id="kpi-profit">--</div>
+          <div class="profit-yuan" id="kpi-profit-yuan"></div>
+        </div>
+      </div>
+    </div>
+    <!-- PB 近10年分位 -->
+    <div class="stat-card skeleton">
+      <div class="stat-label">PB 近10年分位</div>
+      <div class="stat-value" id="kpi-pb">--</div>
+      <div class="stat-sub" id="kpi-pb-sub"></div>
+    </div>
+    <!-- 市场温度（且慢） -->
+    <div class="stat-card skeleton">
+      <div class="stat-label">市场温度（且慢）</div>
+      <div class="temp-row">
+        <div class="temp-item">
+          <span class="temp-lbl">沪深300</span>
+          <span class="temp-val" id="kpi-temp300">--</span>
+        </div>
+        <div class="temp-item">
+          <span class="temp-lbl">中证500</span>
+          <span class="temp-val" id="kpi-temp500">--</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Tier 3：CAGR > 最大回撤 > 持仓份数（次要） ═══ -->
+  <div class="tier3">
+    <div class="mini-card skeleton">
+      <div class="mini-label">CAGR 年化</div>
+      <div class="mini-value" id="kpi-cagr">--</div>
+      <div class="mini-sub">策略启动以来</div>
+    </div>
+    <div class="mini-card skeleton">
+      <div class="mini-label">最大回撤</div>
+      <div class="mini-value" id="kpi-dd">--</div>
+      <div class="mini-sub">峰值至谷底</div>
+    </div>
+    <div class="mini-card skeleton">
+      <div class="mini-label">持仓份数</div>
+      <div class="mini-value" id="kpi-fen">--</div>
+      <div class="mini-track"><div class="mini-fill" id="kpi-fen-bar" style="width:0%"></div></div>
+    </div>
+  </div>
+
+  <!-- ── 主图：点位 + MA + 买卖标记 ── -->
+  <div class="chart-section">
+    <div class="chart-card">
+      <div class="chart-header">
+        <span class="chart-title">创业板指 · 价格走势</span>
+        <div class="chart-legend">
+          <span class="legend-item"><span class="legend-dot" style="background:#1d1d1f"></span>收盘价</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#8e54d6"></span>MA120</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#11a64a"></span>买入</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#e08600"></span>减仓</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#e0392b"></span>清仓</span>
+        </div>
+      </div>
+      <div id="chart-price" style="height:340px"></div>
+    </div>
+  </div>
+
+  <!-- ── 净值对比 ── -->
+  <div class="chart-section">
+    <div class="chart-card">
+      <div class="chart-header">
+        <span class="chart-title">组合净值 vs 基准</span>
+        <div class="chart-legend">
+          <span class="legend-item"><span class="legend-dot" style="background:#0071e3"></span>策略净值</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#11a64a"></span>创业板买持</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#9a9aa0"></span>沪深300</span>
+        </div>
+      </div>
+      <div id="chart-nav" style="height:200px"></div>
+    </div>
+  </div>
+
+  <!-- ── PE/PB 分位 + 温度 ── -->
+  <div class="chart-row">
+    <div class="chart-card">
+      <div class="chart-header">
+        <span class="chart-title">PE / PB 近10年分位</span>
+        <div class="chart-legend">
+          <span class="legend-item"><span class="legend-dot" style="background:#0071e3"></span>PB</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#e08600"></span>PE</span>
+        </div>
+      </div>
+      <div id="chart-val" style="height:200px"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-header">
+        <span class="chart-title">市场温度（且慢）</span>
+        <div class="chart-legend">
+          <span class="legend-item"><span class="legend-dot" style="background:#0071e3"></span>沪深300</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#c79100"></span>中证500</span>
+        </div>
+      </div>
+      <div id="chart-temp" style="height:200px"></div>
+    </div>
+  </div>
+
+
+</div><!-- /container -->
+
+<!-- ── FAB 浮动按钮 ── -->
+<button class="fab" id="fab-btn" title="记录成交" aria-label="打开成交记录">
+  <span style="line-height:1;font-size:22px">＋</span>
+  <span class="fab-badge" id="fab-badge" style="display:none">0</span>
+</button>
+
+<!-- ── 遮罩 ── -->
+<div class="panel-overlay" id="panel-overlay"></div>
+
+<!-- ── 成交记录面板 ── -->
+<div class="ledger-panel" id="ledger-panel" role="dialog" aria-label="成交记录">
+  <div class="panel-handle"></div>
+  <div class="panel-header">
+    <span class="panel-title">成交记录</span>
+    <button class="panel-close" id="panel-close" aria-label="关闭">✕</button>
+  </div>
+
+  <!-- Tab 栏 -->
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="pending">待执行</button>
+    <button class="tab-btn"        data-tab="ledger">记录</button>
+    <button class="tab-btn"        data-tab="log">日志</button>
+    <button class="tab-btn"        data-tab="settings">设置</button>
+  </div>
+
+  <div class="tab-content">
+
+    <!-- ─ Tab 1: 待执行信号 ─ -->
+    <div class="tab-pane active" id="tab-pending">
+      <div id="pending-signals-list">
+        <div class="empty-state">加载中…</div>
+      </div>
+
+      <div class="form-section-title" style="margin-top:24px">手动新增成交</div>
+      <form id="trade-form" autocomplete="off">
+        <div class="form-row">
+          <div class="field">
+            <label>日期</label>
+            <input type="date" id="f-date" required>
+          </div>
+          <div class="field">
+            <label>操作类型</label>
+            <select id="f-action" required>
+              <option value="buy"    class="action-buy"   >买入 buy</option>
+              <option value="reduce" class="action-reduce">减仓 reduce</option>
+              <option value="exit"   class="action-exit"  >清仓 exit</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>份数</label>
+            <input type="number" id="f-fen" min="1" step="1" placeholder="30" required>
+          </div>
+          <div class="field">
+            <label>成交点位 <span id="f-price-badge" style="display:none;font-size:10px;font-weight:500;
+              color:var(--blue);background:rgba(10,132,255,.15);border-radius:4px;padding:1px 5px;
+              margin-left:4px">自动</span></label>
+            <input type="number" id="f-price" min="0" step="0.01" placeholder="自动填入当日收盘价" required>
+          </div>
+        </div>
+        <div class="field">
+          <label>备注</label>
+          <input type="text" id="f-note" placeholder="T1触发 / 周定投 / …">
+        </div>
+        <button type="submit" class="btn-primary">保存成交记录</button>
+      </form>
+    </div>
+
+    <!-- ─ Tab 2: 成交记录表 ─ -->
+    <div class="tab-pane" id="tab-ledger">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span style="font-size:12px;color:var(--text2)" id="ledger-count"></span>
+        <button class="btn-sm btn-fill-sm" id="export-csv-btn"
+                style="background:var(--surface2);color:var(--text)">导出 CSV</button>
+      </div>
+
+      <!-- GitHub 自动同步状态条（setSyncBar 控制显隐） -->
+      <div id="sync-auto-bar" style="display:none;font-size:11px;margin-bottom:8px;
+           padding:5px 10px;border-radius:6px;background:var(--surface2);
+           align-items:center;gap:6px"></div>
+
+      <!-- 均价/浮盈实时计算结果 -->
+      <div id="calc-banner" style="display:none;
+           background:var(--surface2);border-radius:10px;padding:10px 14px;
+           font-size:12px;margin-bottom:12px;display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+        <span style="display:flex;flex-direction:column;gap:2px">
+          <span style="font-size:10px;color:var(--text3)">实际均价</span>
+          <b id="calc-avg" style="color:var(--text);font-size:14px">--</b>
+        </span>
+        <span style="width:1px;height:28px;background:var(--border);align-self:center"></span>
+        <span style="display:flex;flex-direction:column;gap:2px">
+          <span style="font-size:10px;color:var(--text3)">系统均价</span>
+          <b id="calc-avg-server" style="color:var(--text3);font-size:14px">--</b>
+        </span>
+        <span style="flex:1"></span>
+        <span>持仓 <b id="calc-fen" style="color:var(--blue)">--</b> 份</span>
+        <span>浮盈 <b id="calc-fp" style="color:var(--green)">--</b></span>
+      </div>
+
+      <div class="ledger-list" id="ledger-list">
+        <div class="empty-state">暂无记录</div>
+      </div>
+    </div>
+
+    <!-- ─ Tab 3: 操作日志 ─ -->
+    <div class="tab-pane" id="tab-log">
+      <p style="font-size:12px;color:var(--text3);margin-bottom:14px;line-height:1.6">
+        系统所有触发信号的历史记录，可与"记录"页核对手动操作是否一致。<br>
+        绿色边框 = 已找到匹配流水；橙色边框 = 未找到（需核对）。
+      </p>
+      <div id="trigger-log-list">
+        <div class="empty-state">加载中…</div>
+      </div>
+    </div>
+
+    <!-- ─ Tab 4: 设置 & 同步 ─ -->
+    <div class="tab-pane" id="tab-settings">
+      <p class="settings-desc">
+        配置后，每次在"记录"页面增加、编辑或删除操作，<b>2 秒内自动同步</b>到 GitHub 仓库，无需手动操作。<br>
+        PAT 仅需 <b>repo</b> 权限，仅保存在本机浏览器，不会上传。
+      </p>
+
+      <div class="field">
+        <label>GitHub 用户名 / 组织名</label>
+        <input type="text" id="s-owner" placeholder="your-username">
+      </div>
+      <div class="field">
+        <label>仓库名</label>
+        <input type="text" id="s-repo" placeholder="chinext-monitor">
+      </div>
+      <div class="field">
+        <label>Personal Access Token（PAT）</label>
+        <input type="password" id="s-pat" placeholder="ghp_…">
+      </div>
+      <button class="btn-primary" id="save-settings-btn">保存设置</button>
+
+      <div class="form-section-title" style="margin-top:24px">立即同步（手动备用）</div>
+      <p class="settings-desc">
+        正常情况下记录修改后会自动同步。若自动同步失败，可点此手动重试。
+      </p>
+      <button class="btn-primary" id="sync-github-btn"
+              style="background:var(--green);color:#000">立即同步到 GitHub</button>
+      <div id="sync-status" style="display:none" class="sync-status"></div>
+
+      <div class="form-section-title" style="margin-top:24px">或：手动下载 CSV</div>
+      <button class="btn-secondary" id="download-csv-btn">下载 ledger.csv</button>
+      <div class="csv-preview" id="csv-preview" style="display:none"></div>
+    </div>
+
+  </div><!-- /tab-content -->
+</div><!-- /ledger-panel -->
+
+<!-- ECharts CDN（staticfile 国内镜像） -->
+<script src="https://cdn.staticfile.org/echarts/5.5.0/echarts.min.js"
+        onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js'">
+</script>
+<script>
+// ═══════════════════════════════════════════════════════════
+// 全局配色
+// ═══════════════════════════════════════════════════════════
+const C = {
+  bg:      '#f5f5f7', bg2: '#ffffff', surface: '#ffffff',
+  text:    '#1d1d1f',
+  text2:   'rgba(0,0,0,.56)',
+  text3:   'rgba(0,0,0,.38)',
+  border:  'rgba(0,0,0,.12)',
+  grid:    'rgba(0,0,0,.07)',
+  blue:    '#0071e3', green: '#11a64a', red:    '#e0392b',
+  orange:  '#e08600', yellow:'#c79100', purple: '#8e54d6',
+  gray:    '#9a9aa0',
+};
+
+// ECharts 公共基础配置
+const BASE_OPTS = {
+  backgroundColor: 'transparent',
+  textStyle:       { color: C.text2, fontFamily: '-apple-system,BlinkMacSystemFont,sans-serif' },
+  animation:       true,
+  animationDuration: 600,
+};
+
+const AXIS_COMMON = {
+  axisLine:   { lineStyle: { color: C.border } },
+  axisTick:   { show: false },
+  axisLabel:  { color: C.text2, fontSize: 11 },
+  splitLine:  { lineStyle: { color: C.grid, type: 'dashed' } },
+};
+
+function makeTooltip(formatter) {
+  return {
+    trigger: 'axis',
+    axisPointer: { type: 'cross', crossStyle: { color: C.text2 },
+                   lineStyle: { color: C.border } },
+    backgroundColor: 'rgba(255,255,255,.96)',
+    borderColor:     C.border,
+    textStyle:       { color: C.text, fontSize: 12 },
+    extraCssText:    'box-shadow:0 4px 20px rgba(0,0,0,.12);border-radius:10px;',
+    formatter: formatter,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
+// 加载数据
+// ═══════════════════════════════════════════════════════════
+let DATA = null;
+
+async function loadData() {
+  const r = await fetch('data.json?_=' + Date.now());
+  if (!r.ok) throw new Error('data.json 加载失败: ' + r.status);
+  return r.json();
+}
+
+// ═══════════════════════════════════════════════════════════
+// 渲染 KPI 卡片
+// ═══════════════════════════════════════════════════════════
+function pct(v, digits=1) { return v==null ? '--' : (v*100).toFixed(digits)+'%'; }
+function num(v, digits=0) { return v==null ? '--' : (+v).toFixed(digits); }
+// A股习惯：红涨绿跌。正值=涨=红，负值=跌=绿
+function setColor(el, v, pos=C.red, neg=C.green) {
+  if (v==null) return;
+  el.style.color = v>=0 ? pos : neg;
+}
+
+function fmtYuan(v) {
+  if (v == null) return '--';
+  const sign = v >= 0 ? '+' : '-';
+  const abs  = Math.abs(v);
+  return sign + '¥ ' + abs.toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
+}
+
+function renderKPIs(d) {
+  const s = d.status, m = d.metrics;
+
+  // ── 基础计算 ──
+  const initial_capital = s.initial_capital || 2000000;
+  const price_per_fen   = initial_capital / (s.total_fen || 150);
+
+  // 当前持仓成本 & 市值
+  const costBasis     = (s.current_fen || 0) * price_per_fen;
+  const holdingValue  = s.weighted_avg && s.current_close
+    ? costBasis * (s.current_close / s.weighted_avg) : null;
+
+  // 当日收益
+  const closes = d.close || [];
+  let todayClose = null, prevClose = null;
+  for (let i = closes.length - 1; i >= 0; i--) { if (closes[i] != null) { todayClose = closes[i]; break; } }
+  for (let i = closes.length - 2; i >= 0; i--) { if (closes[i] != null) { prevClose  = closes[i]; break; } }
+  const dailyPct  = (todayClose && prevClose) ? (todayClose - prevClose) / prevClose : null;
+  const dailyYuan = (dailyPct != null && holdingValue != null) ? dailyPct * holdingValue : null;
+  const dyEl  = document.getElementById('kpi-daily-yuan');
+  const dpEl  = document.getElementById('kpi-daily-pct');
+  dyEl.textContent = fmtYuan(dailyYuan);
+  setColor(dyEl, dailyYuan);
+  dpEl.textContent = dailyPct != null ? (dailyPct >= 0 ? '+' : '') + pct(dailyPct) : '--';
+  setColor(dpEl, dailyPct);
+
+  // 浮盈：正=红（赚钱），负=绿（亏钱）
+  const fp = s.float_profit;
+  const pfEl = document.getElementById('kpi-profit');
+  pfEl.textContent = pct(fp);
+  setColor(pfEl, fp);
+  // 浮盈金额
+  const fpYuan = (fp != null) ? (s.current_fen || 0) * price_per_fen * fp : null;
+  const pyEl = document.getElementById('kpi-profit-yuan');
+  pyEl.textContent = fmtYuan(fpYuan);
+  setColor(pyEl, fpYuan);
+
+  // CAGR：正=红，负=绿
+  const cagrEl = document.getElementById('kpi-cagr');
+  cagrEl.textContent = pct(m.cagr);
+  setColor(cagrEl, m.cagr);
+
+  // 最大回撤：中性展示（仅保留百分比，不再显示波动率）
+  const ddEl = document.getElementById('kpi-dd');
+  ddEl.textContent = pct(m.max_drawdown);
+
+  // 持仓份数（Tier 3）
+  const fenEl = document.getElementById('kpi-fen');
+  fenEl.textContent = `${s.current_fen} / ${s.total_fen}`;
+  const barPct = s.total_fen > 0 ? (s.current_fen / s.total_fen * 100).toFixed(1) : 0;
+  document.getElementById('kpi-fen-bar').style.width = barPct + '%';
+
+  // PB 分位：高=贵=市场涨=红，低=便宜=市场跌=绿（A股涨跌色 & 策略买卖一致）
+  // <20% 绿（低估买入区）→ 20-60% 黑（中性）→ 60-80% 橙（偏贵）→ ≥80% 红（高估卖出区）
+  const pbArr = d.pb_pct10y;
+  const pbCur = pbArr && pbArr.length ? pbArr[pbArr.length-1] : null;
+  const pbEl  = document.getElementById('kpi-pb');
+  pbEl.textContent = pct(pbCur);
+  if (pbCur != null) {
+    pbEl.style.color = pbCur >= 0.80 ? C.red
+                     : pbCur >= 0.60 ? C.orange
+                     : pbCur <  0.20 ? C.green
+                     : C.text;
+  }
+  document.getElementById('kpi-pb-sub').textContent =
+    s.t3_fired ? 'T3 已触发' : s.t2_fired ? 'T2 已触发' : s.t1_fired ? 'T1 已触发' : '建仓等待中';
+
+  // 市场温度（且慢）
+  function lastNonNull(arr) {
+    if (!arr) return null;
+    for (let i = arr.length - 1; i >= 0; i--) { if (arr[i] != null) return arr[i]; }
+    return null;
+  }
+  function tempColor(t) {
+    if (t == null) return C.text;
+    if (t < 30)  return C.green;
+    if (t < 60)  return C.orange;
+    return C.red;
+  }
+  const temp300 = lastNonNull(d.temp_300);
+  const temp500 = lastNonNull(d.temp_500);
+  const t300El = document.getElementById('kpi-temp300');
+  const t500El = document.getElementById('kpi-temp500');
+  if (t300El) { t300El.textContent = temp300 != null ? temp300.toFixed(1) : '--'; t300El.style.color = tempColor(temp300); }
+  if (t500El) { t500El.textContent = temp500 != null ? temp500.toFixed(1) : '--'; t500El.style.color = tempColor(temp500); }
+
+  // 移除骨架动画
+  document.querySelectorAll('.skeleton').forEach(el => el.classList.remove('skeleton'));
+}
+
+// ═══════════════════════════════════════════════════════════
+// 顶部状态栏
+// ═══════════════════════════════════════════════════════════
+function renderTopbar(d) {
+  const s = d.status;
+  const badge = document.getElementById('phase-badge');
+  const label = document.getElementById('phase-label');
+  label.textContent = s.phase_label || s.phase;
+  badge.className = 'phase-badge ' + (s.phase === 'holding' ? 'holding' : 'waiting');
+
+  document.getElementById('next-action').textContent = s.next_action || '';
+  document.getElementById('last-update').textContent = '更新于 ' + d.last_update;
+
+  if (s.pending_signals > 0) {
+    const pb = document.getElementById('pending-badge');
+    pb.textContent = `⏳ ${s.pending_signals} 条待执行`;
+    pb.style.display = 'inline-block';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 缺口表
+// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// 行动横幅（有待执行信号时全宽强提醒）
+// ═══════════════════════════════════════════════════════════
+function renderActionBanner(d) {
+  const banner  = document.getElementById('action-banner');
+  if (!banner) return;
+  const pending = (d?.status?.pending_signals_list || []).filter(s => !isSignalActed(s));
+  if (!pending.length) { banner.style.display = 'none'; return; }
+
+  // 按优先级排序：清仓 > 减仓 > T3 > T2 > T1 > 右侧 > 周定投
+  const ORDER = { exit:0, reduce:1, T3:2, T2:3, rightside:4, T1:5, weekly_6:6, weekly_3:7 };
+  const sorted = [...pending].sort((a, b) => (ORDER[a.type] ?? 9) - (ORDER[b.type] ?? 9));
+  const top   = sorted[0];
+  const extra = pending.length - 1;
+
+  const LABEL = {
+    T1:'T1 买入信号', T2:'T2 买入信号', T3:'T3 满仓买入',
+    weekly_6:'周定投（6份）', weekly_3:'周定投（3份）',
+    rightside:'右侧补仓', reduce:'减仓 50%', exit:'全部清仓',
+  };
+  const isSell = top.type === 'reduce' || top.type === 'exit';
+  const icon   = isSell ? '📉' : '📈';
+  const label  = LABEL[top.type] || top.type;
+  const detail = [
+    top.fen   ? `${top.fen} 份`          : '',
+    top.price ? `参考点位 ${(+top.price).toFixed(0)}` : '',
+  ].filter(Boolean).join(' · ');
+
+  banner.className    = isSell ? 'ab-sell' : 'ab-buy';
+  banner.style.display = 'flex';
+  banner.innerHTML = `
+    <div class="ab-icon">${icon}</div>
+    <div class="ab-body">
+      <div class="ab-title">⚡ ${label}${detail ? ' · ' + detail : ''}</div>
+      <div class="ab-detail">${top.reason || ''}</div>
+      ${extra > 0 ? `<div class="ab-detail" style="margin-top:3px">另有 ${extra} 条信号待执行</div>` : ''}
+    </div>
+    <button class="ab-btn" onclick="openPanel('pending')">查看并记录 →</button>
+  `;
+}
+
+function renderGaps(d) {
+  const eyebrow = document.querySelector('#gap-hero .hero-eyebrow');
+  const body    = document.getElementById('gap-body');
+  if (!d.gaps || d.gaps.length === 0) {
+    if (eyebrow) eyebrow.innerHTML = '';
+    body.className = 'gap-empty';
+    body.innerHTML = '暂无需要监测的触发条件';
+    return;
+  }
+  // 只显示进度最高（最快触发）的一项
+  const top = d.gaps.reduce((best, g) =>
+    (g.progress || 0) > (best.progress || 0) ? g : best, d.gaps[0]);
+
+  const met    = (top.big === '已满足');
+  const prog   = Math.max(0, Math.min(1, top.progress || 0));
+  const pctNum = Math.round(prog * 100);
+  const bigColor = met ? 'var(--green)' : 'var(--blue)';
+
+  // 尝试把 big 里的数字内嵌到 headline，消除重复显示
+  // big 可能带 +/- 前缀，headline 里是不带符号的纯数字部分
+  const numPart = met ? '' : String(top.big).replace(/^[+\-]/, '');
+  const hIdx    = numPart ? top.headline.indexOf(numPart) : -1;
+  const canInline = hIdx >= 0;
+
+  let headlineSection;
+  if (met) {
+    headlineSection = `
+      <div style="font-size:20px;font-weight:700;color:var(--green);margin:12px 0 5px">✓ 条件已满足</div>
+      <div class="gap-headline">${top.headline}</div>`;
+  } else if (canInline) {
+    // 把 big 数字（含符号）替换 headline 中对应的无符号数字片段
+    const pre  = top.headline.slice(0, hIdx);
+    const post = top.headline.slice(hIdx + numPart.length);
+    headlineSection = `
+      <div class="gap-headline-inline">
+        <span class="gap-pre">${pre}</span><span class="gap-inline-num" style="color:${bigColor}">${top.big}</span><span class="gap-post">${post}</span>
+      </div>`;
+  } else {
+    // fallback（如止盈观察期 big="PB +Xpp" 在 headline 中找不到）
+    const mPre = String(top.big).match(/^(PB|浮盈)\s+(.+)$/);
+    const bigHtml = mPre ? `<span class="gap-big-pre">${mPre[1]}</span>${mPre[2]}` : top.big;
+    headlineSection = `
+      <div class="gap-big" style="color:${bigColor}">${bigHtml}</div>
+      <div class="gap-headline">${top.headline}</div>`;
+  }
+
+  if (eyebrow) {
+    eyebrow.innerHTML = `<span class="gap-type">${top.name}</span>`;
+  }
+  body.className = '';
+  body.innerHTML = `
+    ${headlineSection}
+    ${top.note ? `<div class="gap-note">${top.note}</div>` : ''}
+    <div class="gap-bar"><div class="gap-bar-fill" style="width:${pctNum}%;background:${bigColor}"></div></div>
+    <div class="gap-current">${top.current}</div>
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 预警
+// ═══════════════════════════════════════════════════════════
+function renderWarnings(d) {
+  if (!d.warnings || d.warnings.length === 0) return;
+  document.getElementById('warn-section').style.display = 'block';
+  document.getElementById('warn-list').innerHTML = d.warnings
+    .map(w => `<div class="warn-item">${w}</div>`).join('');
+}
+
+// ═══════════════════════════════════════════════════════════
+// 数据新鲜度（英雄卡底部）
+// ═══════════════════════════════════════════════════════════
+function renderDataFreshness(d) {
+  const el = document.getElementById('data-freshness');
+  if (!el || !d.dates || !d.dates.length) return;
+
+  const dates = d.dates;
+  // 各数据源最后一个非空日期
+  let lastClose = null, last300 = null, last500 = null;
+  for (let i = dates.length - 1; i >= 0; i--) {
+    if (lastClose === null && d.close?.[i]   != null) lastClose = dates[i];
+    if (last300  === null && d.temp_300?.[i] != null) last300   = dates[i];
+    if (last500  === null && d.temp_500?.[i] != null) last500   = dates[i];
+    if (lastClose && last300 && last500) break;
+  }
+
+  const todayStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+  const today    = new Date(todayStr);
+
+  function daysDiff(dateStr) {
+    if (!dateStr) return 9999;
+    return Math.round((today - new Date(dateStr)) / 86400000);
+  }
+
+  const dClose = daysDiff(lastClose);
+  const d300   = daysDiff(last300);
+  const d500   = daysDiff(last500);
+
+  // ── 全部新鲜：单行绿灯 ──
+  if (Math.max(dClose, d300, d500) <= 1) {
+    // 取三者中最旧的日期作为「更新至」日期（最保守）
+    const oldest = [lastClose, last300, last500].filter(Boolean).sort()[0];
+    const [y, m, dd] = oldest.split('-');
+    el.style.display = 'block';
+    el.innerHTML = `<span style="color:var(--green);font-size:9px">●</span>`
+      + ` <span style="color:var(--text3)">所有数据已更新至 ${y}年${+m}月${+dd}日</span>`;
+    return;
+  }
+
+  // ── 有数据滞后：展开三行明细 ──
+  function freshnessChip(dateStr, diff) {
+    if (!dateStr) return `<span style="color:var(--text3)">无数据</span>`;
+    if (diff <= 1) {
+      return `<span style="color:var(--green);font-size:9px">●</span> <span style="color:var(--text3)">${dateStr}</span>`;
+    } else if (diff <= 3) {
+      return `<span style="color:var(--orange);font-size:9px">●</span> <span style="color:var(--text3)">${dateStr}・${diff}天前</span>`;
+    } else {
+      return `<span style="color:var(--red);font-size:9px">●</span> <span style="color:var(--text3)">${dateStr}・</span><span style="color:var(--orange)">${diff}天前 ⚠️</span>`;
+    }
+  }
+
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:max-content 1fr;row-gap:4px;column-gap:10px;align-items:center">
+      <span style="color:var(--text3);white-space:nowrap">创业板指</span><span>${freshnessChip(lastClose, dClose)}</span>
+      <span style="color:var(--text3);white-space:nowrap">温度（300）</span><span>${freshnessChip(last300, d300)}</span>
+      <span style="color:var(--text3);white-space:nowrap">温度（500）</span><span>${freshnessChip(last500, d500)}</span>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 图表公共增强：时间范围按钮 / 触摸准星 / 全屏
+// ═══════════════════════════════════════════════════════════
+function setupChartExtras(card, chart, dates) {
+  // 全屏按钮（插入到 .chart-legend 之后）
+  const legend = card.querySelector('.chart-legend');
+  if (legend) {
+    const fsBtn = document.createElement('button');
+    fsBtn.className = 'chart-fs-btn';
+    fsBtn.title = '全屏';
+    fsBtn.textContent = '⛶';
+    fsBtn.onclick = () => {
+      if (!document.fullscreenElement) {
+        card.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen();
+      }
+    };
+    legend.after(fsBtn);
+  }
+  const onFsChange = () => {
+    const isFs = document.fullscreenElement === card ||
+                 document.webkitFullscreenElement === card;
+    if (isFs) {
+      screen.orientation?.lock('landscape').catch(() => {});
+    } else {
+      screen.orientation?.unlock?.();
+    }
+    setTimeout(() => chart.resize(), 80);
+  };
+  card.addEventListener('fullscreenchange',        onFsChange);
+  card.addEventListener('webkitfullscreenchange',  onFsChange);
+
+  // 时间范围按钮行
+  const chartDiv = card.querySelector('[id^=chart-]');
+  const ranges   = document.createElement('div');
+  ranges.className = 'chart-ranges';
+
+  const BTNS = [
+    { label:'近1月',   months:1  },
+    { label:'近3月',   months:3  },
+    { label:'近6月',   months:6  },
+    { label:'今年以来', ytd:true  },
+    { label:'近1年',   months:12 },
+    { label:'近3年',   months:36 },
+    { label:'近5年',   months:60 },
+    { label:'全部',    all:true  },
+  ];
+  BTNS.forEach(b => {
+    const btn = document.createElement('button');
+    btn.className = 'rng-btn' + (b.all ? ' active' : '');
+    btn.textContent = b.label;
+    btn.onclick = () => {
+      ranges.querySelectorAll('.rng-btn').forEach(x => x.classList.remove('active'));
+      btn.classList.add('active');
+
+      let startIdx = 0;
+      if (!b.all) {
+        let cutoff;
+        if (b.ytd) {
+          cutoff = new Date(new Date().getFullYear(), 0, 1);
+        } else {
+          cutoff = new Date();
+          cutoff.setMonth(cutoff.getMonth() - b.months);
+        }
+        const cutStr = cutoff.toISOString().slice(0, 10);
+        const idx = dates.findIndex(d => d >= cutStr);
+        startIdx = idx < 0 ? 0 : idx;
+      }
+
+      const startPct = (startIdx / Math.max(dates.length - 1, 1)) * 100;
+      chart.dispatchAction({ type:'dataZoom', start:startPct, end:100 });
+    };
+    ranges.appendChild(btn);
+  });
+  card.insertBefore(ranges, chartDiv);
+
+  // 触摸准星：手指滑动 → 显示 tooltip
+  chartDiv.addEventListener('touchmove', e => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const rect  = chartDiv.getBoundingClientRect();
+    chart.dispatchAction({
+      type: 'showTip',
+      x: touch.clientX - rect.left,
+      y: touch.clientY - rect.top,
+    });
+  }, { passive: false });
+  chartDiv.addEventListener('touchend', () => {
+    chart.dispatchAction({ type: 'hideTip' });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// 图表1：价格 + MA120 + 买卖标记
+// ═══════════════════════════════════════════════════════════
+function renderChartPrice(d) {
+  const chart = echarts.init(document.getElementById('chart-price'), null,
+                              { renderer: 'canvas' });
+  const dates = d.dates, close = d.close, ma120 = d.ma120;
+
+  // 买卖散点
+  function makeScatter(signals, color, symbol, size) {
+    return {
+      type: 'scatter', xAxisIndex: 0, yAxisIndex: 0,
+      symbol, symbolSize: size, z: 10,
+      itemStyle: { color },
+      label: { show: false },
+      data: (signals||[]).map(s => ({ value: [s.date, s.value], note: s.note || '' })),
+      tooltip: { formatter: p => `${p.data.note||symbol}<br>${p.data.value[0]}<br>点位: ${p.data.value[1].toFixed(0)}` },
+    };
+  }
+
+  // 填充区（持仓期）
+  const areaData = close.map((v,i) => v);
+
+  const option = {
+    ...BASE_OPTS,
+    tooltip: makeTooltip(params => {
+      let lines = [`<b>${params[0]?.axisValueLabel}</b><br>`];
+      params.forEach(p => {
+        if (p.value == null || p.seriesType === 'scatter') return;
+        lines.push(`<span style="color:${p.color}">●</span> ${p.seriesName}: <b>${(+p.value).toFixed(2)}</b><br>`);
+      });
+      params.filter(p=>p.seriesType==='scatter').forEach(p => {
+        lines.push(`<span style="color:${p.color}">▲</span> ${p.data.note||p.seriesName}: <b>${(+p.data.value[1]).toFixed(0)}</b><br>`);
+      });
+      return lines.join('');
+    }),
+    dataZoom: [
+      { type:'inside', start:0, end:100, filterMode:'none' },
+      { type:'slider', height:24, bottom:6, borderColor:C.border,
+        fillerColor:'rgba(10,132,255,.08)', handleStyle:{color:C.blue},
+        textStyle:{color:C.text2, fontSize:10}, dataBackground:{
+          lineStyle:{color:C.border}, areaStyle:{color:'transparent'} } },
+    ],
+    grid: { top:16, left:56, right:52, bottom:54 },
+    xAxis: {
+      ...AXIS_COMMON, type:'category', data:dates,
+      axisPointer:{ type:'shadow', shadowStyle:{color:'rgba(0,0,0,.04)'} },
+      axisLabel:{ color:C.text2, fontSize:10, hideOverlap:true, showMaxLabel:true },
+    },
+    yAxis: {
+      ...AXIS_COMMON, type:'value', scale:true,
+      axisLabel:{ color:C.text2, fontSize:10, formatter:v=>(v/1000).toFixed(1)+'k' },
+    },
+    series: [
+      // 收盘线（带面积渐变）
+      {
+        name:'创业板指', type:'line', data:close,
+        smooth:false, symbol:'none', z:5,
+        lineStyle:{ color:C.text, width:1.5 },
+        areaStyle:{
+          color: new echarts.graphic.LinearGradient(0,0,0,1,[
+            {offset:0, color:'rgba(0,0,0,.06)'},
+            {offset:1, color:'rgba(0,0,0,.00)'},
+          ])
+        },
+      },
+      // MA120
+      {
+        name:'MA120', type:'line', data:ma120,
+        smooth:false, symbol:'none', z:6,
+        lineStyle:{ color:C.purple, width:1.5, type:'solid' },
+      },
+      // 买入标记
+      makeScatter(d.buy_signals,   C.green,  'triangle',  12),
+      // 减仓标记
+      makeScatter(d.reduce_signals, C.orange, 'triangle-down', 14),
+      // 清仓标记
+      makeScatter(d.exit_signals,   C.red,    'triangle-down', 14),
+    ],
+  };
+  chart.setOption(option);
+  window.addEventListener('resize', () => chart.resize());
+  setupChartExtras(document.getElementById('chart-price').closest('.chart-card'), chart, dates);
+  return chart;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 图表2：净值对比
+// ═══════════════════════════════════════════════════════════
+function renderChartNav(d) {
+  const chart = echarts.init(document.getElementById('chart-nav'), null,
+                              { renderer: 'canvas' });
+  const option = {
+    ...BASE_OPTS,
+    tooltip: makeTooltip(params => {
+      let lines = [`<b>${params[0]?.axisValueLabel}</b><br>`];
+      params.forEach(p => {
+        if (p.value == null) return;
+        lines.push(`<span style="color:${p.color}">●</span> ${p.seriesName}: <b>${(+p.value).toFixed(3)}</b><br>`);
+      });
+      return lines.join('');
+    }),
+    dataZoom: [{ type:'inside', start:0, end:100, filterMode:'none' }],
+    grid: { top:12, left:56, right:52, bottom:36 },
+    xAxis: { ...AXIS_COMMON, type:'category', data:d.dates,
+             axisLabel:{ color:C.text2, fontSize:10, hideOverlap:true, showMaxLabel:true } },
+    yAxis: { ...AXIS_COMMON, type:'value', scale:true,
+             axisLabel:{ color:C.text2, fontSize:10, formatter:v=>(+v).toFixed(2) } },
+    series: [
+      { name:'策略净值',   type:'line', data:d.nav_portfolio, smooth:false, symbol:'none',
+        lineStyle:{ color:C.blue,  width:2 },
+        areaStyle:{ color:new echarts.graphic.LinearGradient(0,0,0,1,[
+          {offset:0,color:'rgba(0,113,227,.16)'},{offset:1,color:'rgba(0,113,227,0)'}]) } },
+      { name:'创业板买持', type:'line', data:d.nav_buy_hold,  smooth:false, symbol:'none',
+        lineStyle:{ color:C.green, width:1.5, type:'dashed' } },
+      { name:'沪深300',   type:'line', data:d.nav_benchmark, smooth:false, symbol:'none',
+        lineStyle:{ color:C.gray,  width:1.2, type:'dotted' } },
+    ],
+  };
+  chart.setOption(option);
+  window.addEventListener('resize', () => chart.resize());
+  setupChartExtras(document.getElementById('chart-nav').closest('.chart-card'), chart, d.dates);
+  return chart;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 图表3：PE/PB 分位
+// ═══════════════════════════════════════════════════════════
+function renderChartVal(d) {
+  const chart = echarts.init(document.getElementById('chart-val'), null,
+                              { renderer: 'canvas' });
+  const option = {
+    ...BASE_OPTS,
+    tooltip: makeTooltip(params => {
+      let lines = [`<b>${params[0]?.axisValueLabel}</b><br>`];
+      params.forEach(p => {
+        if (p.value == null) return;
+        lines.push(`<span style="color:${p.color}">●</span> ${p.seriesName}: <b>${(p.value*100).toFixed(1)}%</b><br>`);
+      });
+      return lines.join('');
+    }),
+    dataZoom: [{ type:'inside', start:0, end:100 }],
+    grid: { top:12, left:48, right:52, bottom:36 },
+    xAxis: { ...AXIS_COMMON, type:'category', data:d.dates,
+             axisLabel:{ color:C.text2, fontSize:10, hideOverlap:true, showMaxLabel:true } },
+    yAxis: {
+      ...AXIS_COMMON, type:'value', min:0, max:1,
+      axisLabel:{ color:C.text2, fontSize:10, formatter:v=>(v*100).toFixed(0)+'%' },
+    },
+    series: [
+      // 参考线：80%(贵) / 20% / 10%(便宜)
+      { type:'line', data:d.dates.map(()=>0.80), symbol:'none', lineStyle:{color:'rgba(224,57,43,.30)',type:'dashed',width:1}, silent:true, tooltip:{show:false} },
+      { type:'line', data:d.dates.map(()=>0.20), symbol:'none', lineStyle:{color:'rgba(17,166,74,.30)',type:'dashed',width:1}, silent:true, tooltip:{show:false} },
+      { type:'line', data:d.dates.map(()=>0.10), symbol:'none', lineStyle:{color:'rgba(17,166,74,.55)',type:'dashed',width:1.5}, silent:true, tooltip:{show:false} },
+      { name:'PB分位', type:'line', data:d.pb_pct10y, smooth:false, symbol:'none',
+        lineStyle:{ color:C.blue, width:2 } },
+      { name:'PE分位', type:'line', data:d.pe_pct10y, smooth:false, symbol:'none',
+        lineStyle:{ color:C.orange, width:1.5, type:'dashed' } },
+    ],
+  };
+  chart.setOption(option);
+  window.addEventListener('resize', () => chart.resize());
+  setupChartExtras(document.getElementById('chart-val').closest('.chart-card'), chart, d.dates);
+  return chart;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 图表4：温度计
+// ═══════════════════════════════════════════════════════════
+function renderChartTemp(d) {
+  const chart = echarts.init(document.getElementById('chart-temp'), null,
+                              { renderer: 'canvas' });
+  const option = {
+    ...BASE_OPTS,
+    tooltip: makeTooltip(params => {
+      let lines = [`<b>${params[0]?.axisValueLabel}</b><br>`];
+      params.forEach(p => {
+        if (p.value == null) return;
+        lines.push(`<span style="color:${p.color}">●</span> ${p.seriesName}: <b>${(+p.value).toFixed(1)}</b><br>`);
+      });
+      return lines.join('');
+    }),
+    dataZoom: [{ type:'inside', start:0, end:100 }],
+    grid: { top:12, left:48, right:52, bottom:36 },
+    xAxis: { ...AXIS_COMMON, type:'category', data:d.dates,
+             axisLabel:{ color:C.text2, fontSize:10, hideOverlap:true, showMaxLabel:true } },
+    yAxis: { ...AXIS_COMMON, type:'value', min:0, max:100,
+             axisLabel:{ color:C.text2, fontSize:10 } },
+    series: [
+      { type:'line', data:d.dates.map(()=>10),  symbol:'none', lineStyle:{color:'rgba(17,166,74,.35)',type:'dashed',width:1}, silent:true, tooltip:{show:false} },
+      { name:'沪深300', type:'line', data:d.temp_300, smooth:true, symbol:'none',
+        lineStyle:{ color:C.blue, width:2 },
+        areaStyle:{ color:new echarts.graphic.LinearGradient(0,0,0,1,[
+          {offset:0,color:'rgba(0,113,227,.12)'},{offset:1,color:'transparent'}]) } },
+      { name:'中证500', type:'line', data:d.temp_500, smooth:true, symbol:'none',
+        lineStyle:{ color:C.yellow, width:1.5, type:'dashed' } },
+    ],
+  };
+  chart.setOption(option);
+  window.addEventListener('resize', () => chart.resize());
+  setupChartExtras(document.getElementById('chart-temp').closest('.chart-card'), chart, d.dates);
+  return chart;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 联动（连接所有图表）
+// ═══════════════════════════════════════════════════════════
+function connectCharts(...charts) {
+  echarts.connect(charts.filter(Boolean));
+}
+
+// ═══════════════════════════════════════════════════════════
+// 成交记录管理器（localStorage 持久化）
+// ═══════════════════════════════════════════════════════════
+class LedgerManager {
+  constructor() {
+    this.KEY = 'chinext_local_trades_v1';
+    this.local = this._load();
+    this.committed = [];   // 从 data.json 填入
+  }
+  _load() {
+    try { return JSON.parse(localStorage.getItem(this.KEY) || '[]'); }
+    catch { return []; }
+  }
+  _save() { localStorage.setItem(this.KEY, JSON.stringify(this.local)); }
+
+  setCommitted(rows) {
+    // 给 committed 行加稳定 id
+    this.committed = (rows || []).map((r, i) => ({...r, id: r.id || `c_${i}`, _src:'committed'}));
+  }
+
+  // 合并：以 local 为主（可覆盖 committed），按日期升序
+  merged() {
+    const localIds = new Set(this.local.filter(t => t._overrides).map(t => t._overrides));
+    const base = this.committed.filter(r => !localIds.has(r.id) && !this.local.find(l => l._deletes === r.id));
+    const all = [...base, ...this.local.filter(l => !l._deletes)];
+    return all.sort((a,b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  }
+
+  add(trade) {
+    const entry = { id:'l_'+Date.now(), _src:'local',
+      date:trade.date, action:trade.action,
+      fen:Number(trade.fen), price:Number(trade.price),
+      note:trade.note || '' };
+    this.local.push(entry);
+    this._save();
+    return entry;
+  }
+
+  edit(id, data) {
+    const li = this.local.findIndex(t => t.id === id);
+    if (li >= 0) {
+      this.local[li] = {...this.local[li], ...data};
+      this._save();
+    } else {
+      // 覆盖 committed 条目
+      const orig = this.committed.find(r => r.id === id);
+      if (!orig) return;
+      this.local = this.local.filter(l => l._overrides !== id);
+      this.local.push({id:'l_'+Date.now(), _src:'local', _overrides:id,
+        date:data.date ?? orig.date, action:data.action ?? orig.action,
+        fen:Number(data.fen ?? orig.fen), price:Number(data.price ?? orig.price),
+        note:data.note ?? orig.note});
+      this._save();
+    }
+  }
+
+  remove(id) {
+    const li = this.local.findIndex(t => t.id === id);
+    if (li >= 0) { this.local.splice(li,1); this._save(); return; }
+    if (this.committed.find(r => r.id === id)) {
+      this.local.push({id:'l_'+Date.now(), _src:'local', _deletes:id,
+        date:'', action:'', fen:0, price:0, note:''});
+      this._save();
+    }
+  }
+
+  hasUnsync() { return this.local.length > 0; }
+
+  toCSV() {
+    const rows = ['date,action,fen,price,note'];
+    for (const t of this.merged()) {
+      const note = (t.note||'').replace(/"/g,'""');
+      rows.push(`${t.date},${t.action},${t.fen},${t.price},"${note}"`);
+    }
+    return rows.join('\n');
+  }
+
+  calcMetrics(currentClose) {
+    const trades = this.merged();
+    const buys   = trades.filter(t => t.action === 'buy');
+    const sells  = trades.filter(t => t.action === 'reduce' || t.action === 'exit');
+    const totalBought = buys.reduce((s,t) => s+t.fen, 0);
+    const totalSold   = sells.reduce((s,t) => s+t.fen, 0);
+    const currentFen  = totalBought - totalSold;
+    const weightedAvg = totalBought > 0
+      ? buys.reduce((s,t) => s+t.fen*t.price, 0) / totalBought : null;
+    const floatProfit = (weightedAvg && currentClose)
+      ? currentClose / weightedAvg - 1 : null;
+    return { totalBought, totalSold, currentFen, weightedAvg, floatProfit };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// GitHub 同步器
+// ═══════════════════════════════════════════════════════════
+class GitHubSyncer {
+  constructor() {
+    this.SKEY = 'chinext_github_v1';
+    this.cfg = JSON.parse(localStorage.getItem(this.SKEY) || '{}');
+  }
+  save(owner, repo, pat) {
+    this.cfg = {owner, repo, pat};
+    localStorage.setItem(this.SKEY, JSON.stringify(this.cfg));
+  }
+  ok() { return !!(this.cfg.owner && this.cfg.repo && this.cfg.pat); }
+  load() { return this.cfg; }
+
+  async sync(csvContent) {
+    const {owner, repo, pat} = this.cfg;
+    if (!owner||!repo||!pat) throw new Error('请先在设置页填写 GitHub 信息');
+    const base = `https://api.github.com/repos/${owner}/${repo}/contents/ledger.csv`;
+    const headers = {'Authorization':`token ${pat}`, 'Accept':'application/vnd.github.v3+json',
+                     'Content-Type':'application/json'};
+    let sha;
+    const get = await fetch(base, {headers});
+    if (get.ok) { sha = (await get.json()).sha; }
+    else if (get.status !== 404) throw new Error(`读取仓库文件失败 ${get.status}`);
+
+    // UTF-8 → base64
+    const bytes = new TextEncoder().encode(csvContent);
+    const b64 = btoa(Array.from(bytes, b => String.fromCharCode(b)).join(''));
+    const body = {message:`记录成交 ${new Date().toISOString().slice(0,10)}`, content:b64};
+    if (sha) body.sha = sha;
+
+    const put = await fetch(base, {method:'PUT', headers, body:JSON.stringify(body)});
+    if (!put.ok) { const e=await put.json(); throw new Error(e.message||`提交失败 ${put.status}`); }
+    return await put.json();
+  }
+
+  async triggerWorkflow() {
+    const {owner, repo, pat} = this.cfg;
+    const url = `https://api.github.com/repos/${owner}/${repo}/actions/workflows/daily.yml/dispatches`;
+    const headers = {'Authorization':`token ${pat}`,'Accept':'application/vnd.github.v3+json','Content-Type':'application/json'};
+    const r = await fetch(url, {method:'POST', headers, body:JSON.stringify({ref:'main', inputs:{no_push:'true'}})});
+    if (!r.ok) { const e=await r.json().catch(()=>({})); throw new Error(`触发重算失败 ${r.status}: ${e.message||''}`); }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 面板控制器
+// ═══════════════════════════════════════════════════════════
+const LM = new LedgerManager();
+const GH = new GitHubSyncer();
+
+// ─ GitHub 自动同步 ─
+let _syncTimer = null;
+let _syncBusy  = false;
+
+function setSyncBar(state, msg) {
+  const bar = document.getElementById('sync-auto-bar');
+  if (!bar) return;
+  const COLOR = { pending:'var(--orange)', syncing:'var(--blue)', ok:'var(--green)', err:'var(--red)' };
+  const ICON  = { pending:'●', syncing:'⟳', ok:'✓', err:'✗' };
+  bar.style.display  = 'flex';
+  bar.style.color    = COLOR[state] || 'var(--text3)';
+  bar.innerHTML = `<span style="font-size:9px">${ICON[state]||''}</span><span>${msg}</span>`;
+}
+
+async function autoSync() {
+  if (!GH.ok() || _syncBusy) return;
+  _syncBusy = true;
+  setSyncBar('syncing', '正在同步到 GitHub…');
+  try {
+    await GH.sync(LM.toCSV());
+    try { await GH.triggerWorkflow(); } catch(e) { console.warn('触发工作流失败(非致命):', e); }
+    _syncBusy = false;          // 先解锁再 _save，避免循环触发
+    LM.local = [];
+    LM._save();
+    renderLedgerTable();
+    updateCalcBanner();
+    const t = new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'});
+    setSyncBar('ok', `已同步 · 仪表盘约3分钟后刷新 · ${t}`);
+  } catch(err) {
+    _syncBusy = false;
+    setSyncBar('err', `同步失败：${err.message}`);
+  }
+}
+
+function scheduleAutoSync() {
+  if (_syncBusy) return;
+  if (!GH.ok()) {
+    // 未配置时静默，不打扰用户
+    return;
+  }
+  clearTimeout(_syncTimer);
+  setSyncBar('pending', '有未同步的修改，2 秒后自动上传…');
+  _syncTimer = setTimeout(autoSync, 2000);
+}
+
+// 劫持 LM._save，每次本地保存后触发自动同步
+const _lmSaveOrig = LM._save.bind(LM);
+LM._save = function() {
+  _lmSaveOrig();
+  if (!_syncBusy) scheduleAutoSync();
+};
+
+function openPanel(tab) {
+  document.getElementById('panel-overlay').classList.add('open');
+  document.getElementById('ledger-panel').classList.add('open');
+  if (tab) switchTab(tab);
+}
+function closePanel() {
+  document.getElementById('panel-overlay').classList.remove('open');
+  document.getElementById('ledger-panel').classList.remove('open');
+}
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab===name));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id===`tab-${name}`));
+}
+
+// 已处理信号追踪
+const ACTED_KEY = 'chinext_acted_signals_v1';
+function getActedSignals() {
+  try { return JSON.parse(localStorage.getItem(ACTED_KEY) || '[]'); }
+  catch { return []; }
+}
+function markSignalActed(sig) {
+  const acted = getActedSignals();
+  acted.push(sig.type + '_' + sig.date);
+  localStorage.setItem(ACTED_KEY, JSON.stringify(acted));
+}
+function isSignalActed(sig) {
+  return getActedSignals().includes(sig.type + '_' + sig.date);
+}
+
+// FAB 徽标
+function updateFabBadge() {
+  const all = DATA?.status?.pending_signals_list || [];
+  const pending = all.filter(s => !isSignalActed(s)).length;
+  const badge = document.getElementById('fab-badge');
+  if (pending > 0) { badge.textContent=pending; badge.style.display='flex'; }
+  else badge.style.display='none';
+}
+
+// ─ 待执行信号渲染 ─
+function renderPendingSignals() {
+  const list = document.getElementById('pending-signals-list');
+  const signals = (DATA?.status?.pending_signals_list || []).filter(s => !isSignalActed(s));
+  if (!signals.length) {
+    list.innerHTML = '<div class="empty-state">暂无待执行信号<br><small>收到买卖信号后会在此显示</small></div>';
+    return;
+  }
+  const typeLabel = {
+    T1:'T1 买入信号', T2:'T2 买入信号', T3:'T3 满仓信号',
+    weekly_6:'周定投（6份）', weekly_3:'周定投（3份）',
+    rightside:'右侧补仓', reduce:'减仓50%', exit:'全部清仓',
+  };
+  list.innerHTML = signals.map(s => `
+    <div class="pending-card" data-sig='${JSON.stringify(s).replace(/'/g,"&apos;")}'>
+      <div class="pc-type">${typeLabel[s.type]||s.type}</div>
+      <div class="pc-detail">${s.reason||''}</div>
+      <div class="pc-meta">信号日期 ${s.date} · 建议 ${s.fen} 份 · 参考点位 ${s.price?.toFixed(0)||'--'}</div>
+      <button class="btn-sm btn-fill-sm" onclick="prefillForm(this)">记录我的成交</button>
+      <button class="btn-sm btn-text-sm" style="margin-left:6px;color:var(--text3)" onclick="this.parentElement.style.opacity='.4'">稍后</button>
+    </div>`).join('');
+}
+
+let _activePendingSignal = null;
+function prefillForm(btn) {
+  const sig = JSON.parse(btn.closest('.pending-card').dataset.sig);
+  _activePendingSignal = sig;
+  const sigDate = sig.date || new Date().toISOString().slice(0,10);
+  document.getElementById('f-date').value   = sigDate;
+  document.getElementById('f-action').value = sig.type.startsWith('weekly')||['T1','T2','T3','rightside'].includes(sig.type) ? 'buy' : sig.type==='reduce' ? 'reduce' : 'exit';
+  document.getElementById('f-fen').value    = sig.fen || '';
+  document.getElementById('f-note').value   = sig.reason || sig.type;
+  autofillPrice(sigDate);
+  // 若自动填入失败（节假日等），退回到信号里的参考价
+  if (!document.getElementById('f-price').value && sig.price) {
+    document.getElementById('f-price').value = Number(sig.price).toFixed(2);
+  }
+  openPanel('pending');
+}
+
+// ─ 流水记录表渲染 ─
+function renderLedgerTable() {
+  const list  = document.getElementById('ledger-list');
+  const count = document.getElementById('ledger-count');
+  const trades = LM.merged();
+  count.textContent = `共 ${trades.length} 条`;
+
+  if (!trades.length) {
+    list.innerHTML = '<div class="empty-state">暂无记录<br><small>在「待执行」页填写成交后会显示在这里</small></div>';
+    updateCalcBanner();
+    return;
+  }
+  const actionLabel = {buy:'买入', reduce:'减仓', exit:'清仓'};
+  const actionColor = {buy:'var(--green)', reduce:'var(--orange)', exit:'var(--red)'};
+
+  list.innerHTML = trades.slice().reverse().map(t => {
+    const local  = t._src === 'local';
+    const badge  = local ? '<span class="badge-local">待同步</span>' : '';
+    return `<div class="ledger-row" data-id="${t.id}">
+      <span class="lr-date">${t.date}</span>
+      <span class="lr-action" style="color:${actionColor[t.action]||'inherit'}">${actionLabel[t.action]||t.action}</span>
+      <span class="lr-fen">${t.fen}份</span>
+      <span class="lr-price">${(+t.price).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+      <span class="lr-note">${t.note||''}${badge}</span>
+      <span class="lr-actions">
+        <button class="btn-icon" onclick="startEdit('${t.id}')">编辑</button>
+        <button class="btn-icon" style="color:var(--red)" onclick="deleteTrade('${t.id}')">删除</button>
+      </span>
+    </div>`;
+  }).join('');
+
+  updateCalcBanner();
+}
+
+function updateCalcBanner() {
+  const banner = document.getElementById('calc-banner');
+  const cur = DATA?.status?.current_close;
+  const m = LM.calcMetrics(cur);
+  if (!m.totalBought) { banner.style.display='none'; return; }
+  banner.style.display='flex';
+  document.getElementById('calc-avg').textContent = m.weightedAvg ? m.weightedAvg.toFixed(2) : '--';
+  const serverAvg = DATA?.status?.weighted_avg;
+  const serverEl = document.getElementById('calc-avg-server');
+  serverEl.textContent = serverAvg ? Number(serverAvg).toFixed(2) : '--';
+  // 若两者相同，系统均价降低显眼度；若不同，标橙提示有待同步记录
+  serverEl.style.color = (!serverAvg || !m.weightedAvg || Math.abs(serverAvg - m.weightedAvg) < 0.01)
+    ? 'var(--text3)' : 'var(--orange)';
+  document.getElementById('calc-fen').textContent = m.currentFen;
+  const fp = document.getElementById('calc-fp');
+  if (m.floatProfit != null) {
+    fp.textContent = (m.floatProfit*100).toFixed(1)+'%';
+    fp.style.color = m.floatProfit >= 0 ? 'var(--green)' : 'var(--red)';
+  } else { fp.textContent = '--'; }
+}
+
+// 编辑行（inline）
+function startEdit(id) {
+  const trade = LM.merged().find(t => t.id === id);
+  if (!trade) return;
+  const rows = document.querySelectorAll('.ledger-row');
+  rows.forEach(r => { if(r.dataset.id===id) r.classList.add('editing'); });
+  document.querySelector(`.ledger-row[data-id="${id}"]`).innerHTML = `
+    <div class="edit-grid">
+      <div class="field" style="margin:0"><label>日期</label><input type="date" id="e-date" value="${trade.date}"></div>
+      <div class="field" style="margin:0"><label>份数</label><input type="number" id="e-fen" value="${trade.fen}" min="1"></div>
+      <div class="field" style="margin:0"><label>点位</label><input type="number" id="e-price" value="${trade.price}" step="0.01"></div>
+    </div>
+    <div class="field" style="margin-bottom:8px"><label>备注</label><input type="text" id="e-note" value="${trade.note||''}"></div>
+    <div class="edit-actions">
+      <button class="btn-save-edit" onclick="saveEdit('${id}')">保存</button>
+      <button class="btn-cancel-edit" onclick="renderLedgerTable()">取消</button>
+    </div>`;
+}
+
+function saveEdit(id) {
+  LM.edit(id, {
+    date:  document.getElementById('e-date').value,
+    fen:   Number(document.getElementById('e-fen').value),
+    price: Number(document.getElementById('e-price').value),
+    note:  document.getElementById('e-note').value,
+  });
+  renderLedgerTable();
+}
+
+function deleteTrade(id) {
+  if (!confirm('确认删除该条记录？')) return;
+  LM.remove(id);
+  renderLedgerTable();
+}
+
+// ─ 触发日志渲染 ─
+function renderTriggerLog() {
+  const list = document.getElementById('trigger-log-list');
+  const log  = (DATA?.trigger_log || []).slice().reverse();
+  if (!log.length) {
+    list.innerHTML = '<div class="empty-state">暂无触发日志<br><small>系统产生买卖信号时会自动记录到此</small></div>';
+    return;
+  }
+  const typeLabel = {
+    T1:'T1 一次性买入', T2:'T2 一次性买入', T3:'T3 满仓买入',
+    weekly_6:'周定投（6份）', weekly_3:'周定投（3份）',
+    rightside:'右侧补仓', reduce:'减仓 50%', exit:'全部清仓',
+  };
+  const typeAction = {
+    T1:'buy', T2:'buy', T3:'buy',
+    weekly_6:'buy', weekly_3:'buy', rightside:'buy',
+    reduce:'reduce', exit:'exit',
+  };
+  const trades = LM.merged();
+  list.innerHTML = log.map(entry => {
+    const label  = typeLabel[entry.type] || entry.type;
+    const action = typeAction[entry.type] || 'buy';
+    const dateMs = new Date(entry.date).getTime();
+    const matched = trades.find(t => {
+      if (t.action !== action) return false;
+      return Math.abs(new Date(t.date).getTime() - dateMs) <= 5 * 86400000;
+    });
+    const statusHtml = matched
+      ? `<div class="le-status" style="color:var(--green)">✓ 已核对：${matched.date} · ${matched.fen}份 @ ${(+matched.price).toFixed(0)}</div>`
+      : `<div class="le-status" style="color:var(--orange)">⚠ 待核对（流水中未找到匹配记录）</div>`;
+    return `<div class="log-entry ${matched ? 'matched' : 'unmatched'}">
+      <div class="le-date">${entry.date}</div>
+      <div class="le-type">${label} · ${entry.fen || 0}份</div>
+      <div class="le-detail">参考点位 ${entry.price != null ? (+entry.price).toFixed(0) : '--'}</div>
+      <div class="le-detail" style="color:var(--text3)">${entry.reason || ''}</div>
+      ${statusHtml}
+    </div>`;
+  }).join('');
+}
+
+// ─ 设置页渲染 ─
+function renderSettings() {
+  const cfg = GH.load();
+  document.getElementById('s-owner').value = cfg.owner||'';
+  document.getElementById('s-repo').value  = cfg.repo||'';
+  document.getElementById('s-pat').value   = cfg.pat||'';
+}
+
+function showSyncStatus(msg, type) {
+  const el = document.getElementById('sync-status');
+  el.textContent = msg; el.className = `sync-status ${type}`; el.style.display='block';
+}
+
+// ─ CSV 导出 / 下载 ─
+function getCSV() { return LM.toCSV(); }
+
+function showCSVPreview() {
+  const pre = document.getElementById('csv-preview');
+  pre.style.display = 'block';
+  pre.textContent   = getCSV();
+}
+
+function downloadCSV() {
+  const csv = getCSV();
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = 'ledger.csv'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ═══════════════════════════════════════════════════════════
+// 事件绑定（DOM ready 后调用）
+// ═══════════════════════════════════════════════════════════
+// 根据日期从 DATA 中查询收盘价；找不到则取最近交易日
+// 返回 {price, date, exact}
+function lookupClose(dateStr) {
+  if (!DATA || !DATA.dates) return null;
+  const idx = DATA.dates.indexOf(dateStr);
+  if (idx !== -1 && DATA.close[idx] != null) {
+    return { price: DATA.close[idx], date: dateStr, exact: true };
+  }
+  // 找最近一个 <= dateStr 且有收盘价的日期
+  for (let i = DATA.dates.length - 1; i >= 0; i--) {
+    if (DATA.dates[i] <= dateStr && DATA.close[i] != null) {
+      return { price: DATA.close[i], date: DATA.dates[i], exact: false };
+    }
+  }
+  return null;
+}
+
+// 自动填入价格并标注"自动"徽章（DATA 未就绪时静默失败）
+function autofillPrice(dateStr) {
+  if (!DATA || !DATA.dates) return;
+  const result = lookupClose(dateStr);
+  const input = document.getElementById('f-price');
+  const badge = document.getElementById('f-price-badge');
+  if (result) {
+    input.value = result.price.toFixed(2);
+    input.readOnly = true;
+    input.style.color = 'var(--blue)';
+    badge.style.display = '';
+    if (result.exact) {
+      badge.textContent = '自动';
+      badge.title = `取自 ${result.date} 收盘价`;
+    } else {
+      badge.textContent = `参考 ${result.date}`;
+      badge.title = `${dateStr} 无数据，取最近交易日 ${result.date} 收盘价，可手动修改`;
+      input.readOnly = false;  // 非精确日期允许手动修改
+    }
+  } else {
+    input.value = '';
+    input.readOnly = false;
+    input.style.color = '';
+    badge.style.display = 'none';
+    input.placeholder = '请手动输入成交点位';
+  }
+}
+
+function initPanel() {
+  // 默认日期为今天，并自动填入价格
+  const todayStr = new Date().toISOString().slice(0,10);
+  document.getElementById('f-date').value = todayStr;
+  autofillPrice(todayStr);
+
+  // 日期变化时自动查询收盘价
+  document.getElementById('f-date').addEventListener('change', e => {
+    autofillPrice(e.target.value);
+  });
+
+  // FAB
+  document.getElementById('fab-btn').addEventListener('click', () => openPanel('pending'));
+  document.getElementById('panel-overlay').addEventListener('click', closePanel);
+  document.getElementById('panel-close').addEventListener('click', closePanel);
+
+  // 如果 URL hash=#pending 自动打开
+  if (location.hash === '#pending') openPanel('pending');
+
+  // Tab 切换
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      switchTab(btn.dataset.tab);
+      if (btn.dataset.tab==='ledger')   renderLedgerTable();
+      if (btn.dataset.tab==='log')      renderTriggerLog();
+      if (btn.dataset.tab==='settings') renderSettings();
+    });
+  });
+
+  // 表单提交
+  document.getElementById('trade-form').addEventListener('submit', e => {
+    e.preventDefault();
+    LM.add({
+      date:   document.getElementById('f-date').value,
+      action: document.getElementById('f-action').value,
+      fen:    document.getElementById('f-fen').value,
+      price:  document.getElementById('f-price').value,
+      note:   document.getElementById('f-note').value,
+    });
+    // 标记信号已处理，卡片立即消失
+    if (_activePendingSignal) {
+      markSignalActed(_activePendingSignal);
+      _activePendingSignal = null;
+      renderPendingSignals();
+    }
+    // 清空份数/备注，重新 autofill 价格
+    document.getElementById('f-fen').value  = '';
+    document.getElementById('f-note').value = '';
+    autofillPrice(document.getElementById('f-date').value);
+    showToast('已保存');
+    updateFabBadge();
+    renderActionBanner(DATA);
+  });
+
+  // 保存 GitHub 设置
+  document.getElementById('save-settings-btn').addEventListener('click', () => {
+    GH.save(
+      document.getElementById('s-owner').value.trim(),
+      document.getElementById('s-repo').value.trim(),
+      document.getElementById('s-pat').value.trim()
+    );
+    showToast('设置已保存');
+  });
+
+  // 同步到 GitHub
+  document.getElementById('sync-github-btn').addEventListener('click', async () => {
+    showSyncStatus('同步中…', 'ing');
+    try {
+      await GH.sync(LM.toCSV());
+      try { await GH.triggerWorkflow(); } catch(e) { console.warn('触发工作流失败(非致命):', e); }
+      _syncBusy = false;
+      LM.local = [];
+      LM._save();
+      renderLedgerTable();
+      updateCalcBanner();
+      const t = new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'});
+      setSyncBar('ok', `已同步 · 仪表盘约3分钟后刷新 · ${t}`);
+      showSyncStatus('同步成功！仪表盘约 3 分钟后自动更新，届时刷新页面即可。', 'ok');
+      showToast('同步成功');
+    } catch(err) {
+      setSyncBar('err', `同步失败：${err.message}`);
+      showSyncStatus('同步失败：' + err.message, 'err');
+    }
+  });
+
+  // 导出 CSV 按钮（记录 Tab）
+  document.getElementById('export-csv-btn').addEventListener('click', () => {
+    openPanel('settings');
+    showCSVPreview();
+  });
+
+  // 下载 CSV
+  document.getElementById('download-csv-btn').addEventListener('click', () => {
+    downloadCSV();
+    showCSVPreview();
+  });
+}
+
+// Toast 提示
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.textContent = msg;
+  Object.assign(t.style, {
+    position:'fixed', bottom:'96px', left:'50%', transform:'translateX(-50%)',
+    background:'rgba(50,215,75,.95)', color:'#000',
+    padding:'8px 20px', borderRadius:'20px', fontSize:'13px',
+    fontWeight:'600', zIndex:'999', transition:'opacity .3s',
+    whiteSpace:'nowrap', pointerEvents:'none',
+  });
+  document.body.appendChild(t);
+  setTimeout(() => { t.style.opacity='0'; setTimeout(()=>t.remove(), 350); }, 1600);
+}
+
+// ═══════════════════════════════════════════════════════════
+// 主入口
+// ═══════════════════════════════════════════════════════════
+(async function() {
+  try {
+    DATA = await loadData();
+    renderTopbar(DATA);
+    renderActionBanner(DATA);
+    renderKPIs(DATA);
+    renderGaps(DATA);
+    renderWarnings(DATA);
+    renderDataFreshness(DATA);
+    const c1 = renderChartPrice(DATA);
+    const c2 = renderChartNav(DATA);
+    const c3 = renderChartVal(DATA);
+    const c4 = renderChartTemp(DATA);
+    connectCharts(c1, c2, c3, c4);
+
+    // 初始化成交面板
+    LM.setCommitted(DATA.committed_ledger || []);
+    initPanel();
+    renderPendingSignals();
+    updateFabBadge();
+
+  } catch(e) {
+    console.error('仪表盘加载失败:', e);
+    document.querySelector('.container').insertAdjacentHTML('afterbegin',
+      `<div style="color:#ff453a;padding:20px;background:#1c1c1e;border-radius:12px;margin-bottom:16px">
+       ⚠️ 数据加载失败：${e.message}<br><small style="opacity:.6">请确认 data.json 已生成（运行 python src/main.py）</small></div>`
+    );
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "cycle_id": 2,
+  "cycle_start_date": "2023-04-24",
+  "fen_size": 13333.33,
+  "t1_fired": true,
+  "t2_fired": true,
+  "t3_fired": true,
+  "rightside_used": false,
+  "armed": true,
+  "reduced": false,
+  "observation_entered": true,
+  "exit_streak": 0,
+  "signals_pending": [],
+  "last_successful_run": null,
+  "phase": "holding",
+  "_note": "本文件由引擎每日自动更新并 commit，勿手动修改逻辑字段。如需重置，运行 python src/backtest.py --reset"
+}

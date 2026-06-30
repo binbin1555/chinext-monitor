@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# 本地原始数据导出（已合并进 history.csv，不提交）
+创业板指_*.csv
+创业板近10年均线_*.csv
+国债收益率.csv
+且慢app-*.txt
+创业板指_归属于*.csv
+
+# 含密钥的本地文档（绝不提交）
+理杏仁API*.txt
+且慢温度计MCP抓取指南.txt
+
+# 搭建过程中的一次性脚本
+fill_*.py
+
+# 本地文档（不需要进仓库）
+创业板大周期择时操作手册.md
+创业板监测系统_搭建手册Prompt.md
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude Code 内部目录（本地工具，不提交）
+.claude/
