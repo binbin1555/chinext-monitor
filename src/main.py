@@ -85,15 +85,19 @@ def main():
         try:
             hist = update_history(config, data_dir)
         except Exception as e:
-            logger.error(f"数据更新失败: {e}")
-            notifier.send_error(f"数据更新失败（{today_str}）: {e}")
-            # 尝试用缓存继续
+            logger.error(f"理杏仁数据拉取失败: {e}")
+            notifier.send_error(
+                f"⛔ 数据获取失败（{today_str}）\n"
+                f"错误: {e}\n"
+                f"策略引擎已暂停，不使用缓存数据。\n"
+                f"请检查 LIXINGER_TOKEN 及网络连通性。"
+            )
+            # 仅用缓存刷新仪表盘展示，不运行引擎
             csv_path = data_dir / "history.csv"
             if csv_path.exists():
-                hist = pd.read_csv(csv_path, dtype={"date": str})
-                logger.warning("使用缓存数据继续运行")
-            else:
-                raise
+                hist_cache = pd.read_csv(csv_path, dtype={"date": str})
+                _update_dashboard(hist_cache, state, ledger, config, docs_dir)
+            return  # 严禁继续运行策略引擎
     else:
         csv_path = data_dir / "history.csv"
         hist = pd.read_csv(csv_path, dtype={"date": str}) if csv_path.exists() else pd.DataFrame()

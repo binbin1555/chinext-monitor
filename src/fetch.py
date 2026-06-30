@@ -453,43 +453,44 @@ def update_history(config: dict, data_dir: Path):
     # ── 从理杏仁拉取增量（若有 token） ──
     if token and fetch_start <= fetch_end:
         logger.info(f"从理杏仁拉取 {fetch_start} ~ {fetch_end}")
+        chinext_code = config.get("chinext_code", "399006")
+        bench_code   = config.get("benchmark_code", "000300")
+
+        # 创业板基本面（close/PE/PB/分位）—— 关键数据，失败直接抛出，禁止降级
+        fundam = fetch_lixinger_fundamental(token, chinext_code, fetch_start, fetch_end)
+
+        # 沪深300收盘价 —— 仅用于图表展示，失败时仅警告，不阻断流程
+        c300 = {}
         try:
-            chinext_code = config.get("chinext_code", "399006")
-            bench_code   = config.get("benchmark_code", "000300")
-
-            # 基本面接口一次获取 close + pe_ttm + pb（399006）
-            fundam = fetch_lixinger_fundamental(token, chinext_code, fetch_start, fetch_end)
-            # 单独拉沪深300收盘价用于均线参考
-            c300   = fetch_lixinger_close(token, bench_code, fetch_start, fetch_end)
-
-            all_dates = sorted(fundam.keys())
-            new_rows = []
-            for d in all_dates:
-                f = fundam[d]
-                row = {
-                    "date":      d,
-                    "close":     f.get("close"),
-                    "pb":        f.get("pb"),
-                    "pe_ttm":    f.get("pe_ttm"),
-                    "pb_pct10y": f.get("pb_pct10y"),   # 理杏仁官方近10年分位
-                    "pe_pct10y": f.get("pe_pct10y"),   # 理杏仁官方近10年分位
-                    "ma20":      np.nan,
-                    "ma60":      np.nan,
-                    "ma120":     np.nan,
-                    "close_300": c300.get(d),
-                    "temp_300":  np.nan,
-                    "temp_500":  np.nan,
-                }
-                new_rows.append(row)
-
-            if new_rows:
-                new_df = pd.DataFrame(new_rows, columns=HISTORY_COLS)
-                hist = pd.concat([hist, new_df], ignore_index=True)
-                hist = hist.sort_values("date").drop_duplicates("date").reset_index(drop=True)
-                logger.info(f"新增 {len(new_rows)} 条理杏仁数据")
-
+            c300 = fetch_lixinger_close(token, bench_code, fetch_start, fetch_end)
         except Exception as e:
-            logger.error(f"理杏仁拉取失败，使用缓存: {e}")
+            logger.warning(f"沪深300增量拉取失败，新行 close_300 暂缺: {e}")
+
+        all_dates = sorted(fundam.keys())
+        new_rows = []
+        for d in all_dates:
+            f = fundam[d]
+            row = {
+                "date":      d,
+                "close":     f.get("close"),
+                "pb":        f.get("pb"),
+                "pe_ttm":    f.get("pe_ttm"),
+                "pb_pct10y": f.get("pb_pct10y"),   # 理杏仁官方近10年分位
+                "pe_pct10y": f.get("pe_pct10y"),   # 理杏仁官方近10年分位
+                "ma20":      np.nan,
+                "ma60":      np.nan,
+                "ma120":     np.nan,
+                "close_300": c300.get(d),
+                "temp_300":  np.nan,
+                "temp_500":  np.nan,
+            }
+            new_rows.append(row)
+
+        if new_rows:
+            new_df = pd.DataFrame(new_rows, columns=HISTORY_COLS)
+            hist = pd.concat([hist, new_df], ignore_index=True)
+            hist = hist.sort_values("date").drop_duplicates("date").reset_index(drop=True)
+            logger.info(f"新增 {len(new_rows)} 条理杏仁数据")
 
     # ── 补填历史 close_300（种子数据导入时该列为空，一次性回填） ──
     if token:
