@@ -79,7 +79,7 @@ def fetch_lixinger_close(token, stock_code, start_date, end_date):
     }
     r = _post_with_retry(LIXINGER_FUND_URL, body)
     resp = r.json()
-    if resp.get("code") != 200 or not resp.get("data"):
+    if resp.get("code") not in (1, 200) or not resp.get("data"):
         raise RuntimeError(f"理杏仁 cp 接口异常({stock_code}): {resp.get('message', resp)}")
     result = {}
     for item in resp["data"]:
@@ -110,7 +110,7 @@ def fetch_lixinger_fundamental(token, stock_code, start_date, end_date):
     }
     r = _post_with_retry(LIXINGER_FUND_URL, body)
     resp = r.json()
-    if resp.get("code") != 200 or not resp.get("data"):
+    if resp.get("code") not in (1, 200) or not resp.get("data"):
         raise RuntimeError(f"理杏仁 基本面接口异常: {resp.get('message', resp)}")
 
     result = {}
