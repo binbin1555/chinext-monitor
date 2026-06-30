@@ -512,11 +512,13 @@ def update_history(config: dict, data_dir: Path):
             except Exception as e:
                 logger.error(f"close_300 补填失败: {e}")
 
-    # ── 重算均线；分位优先用理杏仁 cvpos，仅对种子数据中的 NaN 行本地兜底 ──
+    # ── 重算均线；分位优先用理杏仁 cvpos，仅对【缺失行】本地兜底（不覆盖官方分位）──
     hist = compute_mas(hist)
-    if hist["pb_pct10y"].isna().any():
-        logger.info("部分行缺少分位数据，执行本地兜底计算…")
-        hist = compute_percentiles(hist)
+    if hist["pb_pct10y"].isna().any() or hist["pe_pct10y"].isna().any():
+        logger.info("部分行缺少官方分位，仅对缺失行本地兜底（保留理杏仁 cvpos）…")
+        local = compute_percentiles(hist)
+        hist["pb_pct10y"] = hist["pb_pct10y"].fillna(local["pb_pct10y"])
+        hist["pe_pct10y"] = hist["pe_pct10y"].fillna(local["pe_pct10y"])
 
     # ── 更新今日温度（若有 key） ──
     if qkey:

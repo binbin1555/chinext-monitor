@@ -154,3 +154,7 @@ class BarkNotifier:
             body=error_msg,
             level="timeSensitive",
         )
+
+    def send_info(self, title: str, body: str):
+        """一般信息通知（如数据延迟提示），不打扰为 timeSensitive。"""
+        self._send(title=title, body=body, level="active")

@@ -874,6 +874,12 @@ async function loadData() {
 // ═══════════════════════════════════════════════════════════
 function pct(v, digits=1) { return v==null ? '--' : (v*100).toFixed(digits)+'%'; }
 function num(v, digits=0) { return v==null ? '--' : (+v).toFixed(digits); }
+// HTML 转义：所有来自账本/备注/服务端文本的字符串注入 innerHTML 前必须经过它，
+// 防止 note 等用户可控内容里的标签执行脚本（XSS → 可读取本地存储的 GitHub PAT）
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 // A股习惯：红涨绿跌。正值=涨=红，负值=跌=绿
 function setColor(el, v, pos=C.red, neg=C.green) {
   if (v==null) return;
@@ -1033,8 +1039,8 @@ function renderActionBanner(d) {
   banner.innerHTML = `
     <div class="ab-icon">${icon}</div>
     <div class="ab-body">
-      <div class="ab-title">⚡ ${label}${detail ? ' · ' + detail : ''}</div>
-      <div class="ab-detail">${top.reason || ''}</div>
+      <div class="ab-title">⚡ ${esc(label)}${detail ? ' · ' + esc(detail) : ''}</div>
+      <div class="ab-detail">${esc(top.reason)}</div>
       ${extra > 0 ? `<div class="ab-detail" style="margin-top:3px">另有 ${extra} 条信号待执行</div>` : ''}
     </div>
     <button class="ab-btn" onclick="openPanel('pending')">查看并记录 →</button>
@@ -1278,7 +1284,7 @@ function renderChartPrice(d) {
       symbol, symbolSize: size, z: 10,
       itemStyle: { color },
       label: { show: false },
-      data: (signals||[]).map(s => ({ value: [s.date, s.value], note: s.note || '' })),
+      data: (signals||[]).map(s => ({ value: [s.date, s.value], note: esc(s.note) })),
       tooltip: { formatter: p => `${p.data.note||symbol}<br>${p.data.value[0]}<br>点位: ${p.data.value[1].toFixed(0)}` },
     };
   }
@@ -1724,7 +1730,7 @@ function renderPendingSignals() {
   list.innerHTML = signals.map(s => `
     <div class="pending-card" data-sig='${JSON.stringify(s).replace(/'/g,"&apos;")}'>
       <div class="pc-type">${typeLabel[s.type]||s.type}</div>
-      <div class="pc-detail">${s.reason||''}</div>
+      <div class="pc-detail">${esc(s.reason)}</div>
       <div class="pc-meta">信号日期 ${s.date} · 建议 ${s.fen} 份 · 参考点位 ${s.price?.toFixed(0)||'--'}</div>
       <button class="btn-sm btn-fill-sm" onclick="prefillForm(this)">记录我的成交</button>
       <button class="btn-sm btn-text-sm" style="margin-left:6px;color:var(--text3)" onclick="this.parentElement.style.opacity='.4'">稍后</button>
@@ -1771,7 +1777,7 @@ function renderLedgerTable() {
       <span class="lr-action" style="color:${actionColor[t.action]||'inherit'}">${actionLabel[t.action]||t.action}</span>
       <span class="lr-fen">${t.fen}份</span>
       <span class="lr-price">${(+t.price).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
-      <span class="lr-note">${t.note||''}${badge}</span>
+      <span class="lr-note">${esc(t.note)}${badge}</span>
       <span class="lr-actions">
         <button class="btn-icon" onclick="startEdit('${t.id}')">编辑</button>
         <button class="btn-icon" style="color:var(--red)" onclick="deleteTrade('${t.id}')">删除</button>
@@ -1797,7 +1803,10 @@ function updateCalcBanner() {
     ? 'var(--text3)' : 'var(--orange)';
   document.getElementById('calc-fen').textContent = m.currentFen;
   const fp = document.getElementById('calc-fp');
-  if (m.floatProfit != null) {
+  if (m.currentFen <= 0) {
+    fp.textContent = '已清仓';
+    fp.style.color = 'var(--text3)';
+  } else if (m.floatProfit != null) {
     fp.textContent = (m.floatProfit*100).toFixed(1)+'%';
     fp.style.color = m.floatProfit >= 0 ? 'var(--green)' : 'var(--red)';
   } else { fp.textContent = '--'; }
@@ -1872,7 +1881,7 @@ function renderTriggerLog() {
       <div class="le-date">${entry.date}</div>
       <div class="le-type">${label} · ${entry.fen || 0}份</div>
       <div class="le-detail">参考点位 ${entry.price != null ? (+entry.price).toFixed(0) : '--'}</div>
-      <div class="le-detail" style="color:var(--text3)">${entry.reason || ''}</div>
+      <div class="le-detail" style="color:var(--text3)">${esc(entry.reason)}</div>
       ${statusHtml}
     </div>`;
   }).join('');

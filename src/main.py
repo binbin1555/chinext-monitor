@@ -18,6 +18,13 @@ from datetime import date, datetime, timedelta
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
+# Windows 控制台默认 GBK，日志中的 emoji 会 UnicodeEncodeError——强制 UTF-8 输出
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 import yaml
 from src.fetch    import update_history
 from src.engine   import Engine, recalc_from_ledger, calc_warnings
@@ -109,8 +116,20 @@ def main():
     # ── Step 2：判断是否为交易日 ──
     latest_date = hist["date"].max()
     if latest_date != today_str:
-        logger.info(f"今日（{today_str}）非交易日，最新数据日期 {latest_date}，跳过引擎运行")
-        # 仍然更新仪表盘数据（不发推送）
+        logger.info(f"今日（{today_str}）最新数据为 {latest_date}，非新交易日，跳过引擎运行")
+        # 工作日却没有今日数据：可能是节假日，也可能是数据延迟/定时器过早——提示一次（每日去重）
+        is_weekday = datetime.strptime(today_str, "%Y-%m-%d").weekday() < 5
+        if (is_weekday and not args.no_push and not args.report_only
+                and state.get("last_stale_alert") != today_str):
+            notifier.send_info(
+                f"ℹ️ 今日暂无新交易数据（{today_str}）",
+                f"最新数据仍为 {latest_date}。\n"
+                f"若为节假日属正常；若为交易日，请检查理杏仁是否已发布数据、"
+                f"或定时器是否在收盘(07:00 UTC)之后触发。"
+            )
+            state["last_stale_alert"] = today_str
+            save_state(state)
+        # 仍然更新仪表盘数据（不重复推送）
         _update_dashboard(hist, state, ledger, config, docs_dir)
         return
 
@@ -119,54 +138,85 @@ def main():
         logger.info("--fetch-only 模式，数据已更新")
         return
 
-    # ── Step 2.5：清理已执行的 pending signals ──
+    total_fen = config.get("total_fen", 150)
+
+    # ── Step 2.4：轮次重置（上一轮已全清仓并回填 → 自动开启新一轮）──
+    cyc_start = state.get("cycle_start_date") or config.get("start_date", "2023-01-01")
+    state["cycle_start_date"] = cyc_start
+    _ls = recalc_from_ledger(ledger, total_fen, cyc_start)
+    if _ls["has_exited"] and _ls["current_fen"] == 0 and _ls["total_bought"] > 0:
+        cyc_rows   = ledger[ledger["date"] >= cyc_start]
+        last_trade = cyc_rows["date"].max()
+        new_start  = (datetime.strptime(last_trade, "%Y-%m-%d")
+                      + timedelta(days=1)).strftime("%Y-%m-%d")
+        old_cycle  = state.get("cycle_id", 1)
+        state.setdefault("completed_cycles", []).append(
+            {"cycle_id": old_cycle, "start": cyc_start, "end": last_trade})
+        state.update({
+            "cycle_id": old_cycle + 1,
+            "cycle_start_date": new_start,
+            "t1_fired": False, "t2_fired": False, "t3_fired": False,
+            "rightside_used": False, "armed": False, "reduced": False,
+            "observation_entered": False, "exit_streak": 0,
+            "last_weekly_week": None, "phase": "waiting",
+        })
+        logger.info(f"上一轮(第{old_cycle}轮)已清仓，开启第{state['cycle_id']}轮，"
+                    f"cycle_start_date={new_start}")
+        if not args.no_push:
+            notifier.send_info(
+                f"🔄 第{old_cycle}轮已全部清仓并回填",
+                f"系统已重置，开启第{state['cycle_id']}轮建仓监测。")
+        save_state(state)
+
+    # ── Step 2.5：对账——按(日期,动作,份数)精确匹配，逐行消费，避免一笔回填误清同日多信号 ──
     if state.get("signals_pending") and len(ledger) > 0:
         action_map = {
             'T1':'buy','T2':'buy','T3':'buy',
             'weekly_3':'buy','weekly_6':'buy','rightside':'buy',
             'reduce':'reduce','exit':'exit',
         }
-        cleaned = []
+        used_rows = set()
+        cleaned   = []
         for sig in state["signals_pending"]:
-            sig_date = sig.get("date", "")
+            sig_date   = sig.get("date", "")
             sig_action = action_map.get(sig.get("type", ""), "buy")
-            match = ledger[(ledger["date"] == sig_date) & (ledger["action"] == sig_action)]
-            if len(match) == 0:
-                cleaned.append(sig)
+            sig_fen    = sig.get("fen", 0)
+            cand = ledger[(ledger["date"] == sig_date)
+                          & (ledger["action"] == sig_action)
+                          & (ledger["fen"] == sig_fen)]
+            matched = next((i for i in cand.index if i not in used_rows), None)
+            if matched is None:
+                cleaned.append(sig)        # 未回填 → 保留提醒（不再 7 天过期）
+            else:
+                used_rows.add(matched)     # 此 ledger 行已被认领，避免重复匹配
         if len(cleaned) != len(state["signals_pending"]):
-            logger.info(f"已清理 {len(state['signals_pending'])-len(cleaned)} 条已执行信号")
+            logger.info(f"已核对 {len(state['signals_pending'])-len(cleaned)} 条已回填信号")
         state["signals_pending"] = cleaned
-    # 清除超过 7 天的过期信号
-    if state.get("signals_pending"):
-        cutoff = (date.today() - timedelta(days=7)).strftime("%Y-%m-%d")
-        before = len(state["signals_pending"])
-        state["signals_pending"] = [
-            s for s in state["signals_pending"] if s.get("date", "") >= cutoff
-        ]
-        if len(state["signals_pending"]) < before:
-            logger.info(f"已清理 {before - len(state['signals_pending'])} 条过期信号（>7天）")
 
-    # ── Step 3：运行策略引擎 ──
-    engine  = Engine(config, state, ledger, hist)
-    signals = engine.run_daily(today_str)
-    state   = engine.state
+    # ── Step 3-8：引擎 + 推送 + 日报（统一异常兜底，失败即 Bark 告警）──
+    try:
+        cyc_start = state.get("cycle_start_date")
 
-    warnings = calc_warnings(hist, today_str, state, ledger, config)
+        # Step 3：运行策略引擎
+        engine  = Engine(config, state, ledger, hist)
+        signals = engine.run_daily(today_str)
+        state   = engine.state
+        warnings = calc_warnings(hist, today_str, state, ledger, config)
 
-    # ── Step 4：推送信号 ──
-    if not args.no_push:
-        ls = recalc_from_ledger(ledger, config.get("total_fen", 150))
+        # Step 4：推送信号
+        if not args.no_push:
+            ls = recalc_from_ledger(ledger, total_fen, cyc_start)
+            for sig in signals:
+                notifier.send_signal(sig, today_str,
+                                      ls.get("total_bought", 0), total_fen)
+            if warnings:
+                notifier.send_warnings(warnings, today_str)
+
+        # Step 5：记录 pending signals + 永久触发日志（同日同类型去重）
+        state.setdefault("trigger_log", [])
         for sig in signals:
-            notifier.send_signal(sig, today_str,
-                                  ls.get("total_bought", 0),
-                                  config.get("total_fen", 150))
-        if warnings:
-            notifier.send_warnings(warnings, today_str)
-
-    # ── Step 5：记录 pending signals + 永久触发日志 ──
-    state.setdefault("trigger_log", [])
-    for sig in signals:
-        if sig["type"] not in ("enter_observation",):  # 这类不需要用户操作
+            if sig["type"] in ("enter_observation",):   # 这类无需用户操作
+                continue
             price_val = sig.get("price")
             entry = {
                 "date": today_str,
@@ -175,31 +225,44 @@ def main():
                 "price": round(float(price_val), 2) if price_val is not None else None,
                 "reason": sig.get("reason", ""),
             }
-            state.setdefault("signals_pending", []).append(entry.copy())
-            state["trigger_log"].append(entry)  # 永久保留，不过期
+            def _exists(lst):
+                return any(e.get("date") == entry["date"]
+                           and e.get("type") == entry["type"] for e in lst)
+            if not _exists(state.get("signals_pending", [])):
+                state.setdefault("signals_pending", []).append(entry.copy())
+            if not _exists(state["trigger_log"]):
+                state["trigger_log"].append(entry)      # 永久保留
 
-    # ── Step 6：更新仪表盘数据 ──
-    _update_dashboard(hist, state, ledger, config, docs_dir, warnings=warnings)
+        # Step 6：更新仪表盘数据
+        _update_dashboard(hist, state, ledger, config, docs_dir, warnings=warnings)
 
-    # ── Step 7：发日报 ──
-    if not args.no_push:
-        ls    = recalc_from_ledger(ledger, config.get("total_fen", 150))
-        nav_df = build_nav_series(hist, ledger, config, state)
-        nav_arr = nav_df["nav_portfolio"].tolist() if len(nav_df) > 0 else [1.0]
-        perf  = calc_performance(
-            nav_arr, config.get("start_date", "2023-01-01"),
-            config.get("cash_rate_annual", 0.02)
+        # Step 7：发日报
+        if not args.no_push:
+            ls     = recalc_from_ledger(ledger, total_fen, cyc_start)
+            nav_df = build_nav_series(hist, ledger, config, state)
+            nav_arr = nav_df["nav_portfolio"].tolist() if len(nav_df) > 0 else [1.0]
+            perf  = calc_performance(
+                nav_arr, config.get("start_date", "2023-01-01"),
+                config.get("cash_rate_annual", 0.02)
+            )
+            today_row = hist[hist["date"] == today_str].iloc[0].to_dict() if len(
+                hist[hist["date"] == today_str]) > 0 else {}
+            notifier.send_daily_report(
+                today_str, perf, state, ls, today_row, warnings
+            )
+
+        # Step 8：保存状态
+        state["last_successful_run"] = today_str
+        save_state(state)
+        logger.info(f"state.json 已更新，signals={[s['type'] for s in signals]}")
+
+    except Exception as e:
+        logger.error(f"引擎/日报运行失败: {e}", exc_info=True)
+        notifier.send_error(
+            f"🔴 引擎运行异常（{today_str}）\n错误: {e}\n"
+            f"策略状态未更新，请检查 Actions 日志。"
         )
-        today_row = hist[hist["date"] == today_str].iloc[0].to_dict() if len(
-            hist[hist["date"] == today_str]) > 0 else {}
-        notifier.send_daily_report(
-            today_str, perf, state, ls, today_row, warnings
-        )
-
-    # ── Step 8：保存状态 ──
-    state["last_successful_run"] = today_str
-    save_state(state)
-    logger.info(f"state.json 已更新，signals={[s['type'] for s in signals]}")
+        raise
 
 
 def _update_dashboard(hist, state, ledger, config, docs_dir, warnings=None):

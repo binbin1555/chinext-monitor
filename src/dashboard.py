@@ -78,7 +78,8 @@ def generate_data_json(
 
     # ── 当前状态摘要 ──
     from src.engine import recalc_from_ledger
-    ls = recalc_from_ledger(ledger, config.get("total_fen", 150))
+    ls = recalc_from_ledger(ledger, config.get("total_fen", 150),
+                            state.get("cycle_start_date"))
     today_row = hist.iloc[-1] if len(hist) > 0 else None
     cur_close = float(today_row["close"]) if today_row is not None and not pd.isna(today_row["close"]) else None
     float_profit = None

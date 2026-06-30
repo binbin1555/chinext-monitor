@@ -17,9 +17,12 @@ logger = logging.getLogger(__name__)
 # 流水重算
 # ─────────────────────────────────────────────
 
-def recalc_from_ledger(ledger: pd.DataFrame, total_fen: int = 150):
+def recalc_from_ledger(ledger: pd.DataFrame, total_fen: int = 150,
+                       cycle_start_date: str = None):
     """
     从 ledger.csv 重算持仓状态。
+    cycle_start_date 非空时，只统计该日期（含）之后的流水——确保多轮次下
+    每一轮的均价/持仓相互独立，不被上一轮已清仓的流水污染。
     返回：
       total_bought   已累计买入份数
       total_sold     已累计卖出份数（reduce + exit）
@@ -28,6 +31,9 @@ def recalc_from_ledger(ledger: pd.DataFrame, total_fen: int = 150):
       has_reduced    是否已做过 50% 减仓
       has_exited     是否已全部清仓（本轮）
     """
+    if ledger is not None and len(ledger) > 0 and cycle_start_date:
+        ledger = ledger[ledger["date"] >= cycle_start_date]
+
     if ledger is None or len(ledger) == 0:
         return dict(
             total_bought=0, total_sold=0, current_fen=0,
@@ -200,7 +206,8 @@ class Engine:
             logger.warning(f"{today_str} 数据不完整（close={close}, pb_pct={pb_pct}），跳过")
             return []
 
-        ledger_state = recalc_from_ledger(self.ledger, self.total_fen)
+        ledger_state = recalc_from_ledger(self.ledger, self.total_fen,
+                                          self.state.get("cycle_start_date"))
         total_bought  = ledger_state["total_bought"]
         current_fen   = ledger_state["current_fen"]
         weighted_avg  = ledger_state["weighted_avg"]
@@ -221,8 +228,12 @@ class Engine:
         # ══════════════════════════════════════════
         if remaining_fen > 0:
 
-            # 1. 周定投（每周第一个交易日）
-            if is_first_trading_day_of_week(today_str, hist_dates[:-1]):
+            # 1. 周定投（每周第一个交易日，每周仅一次——防同日/同周重复触发）
+            iso = datetime.strptime(today_str, "%Y-%m-%d").isocalendar()
+            week_key = f"{iso[0]}-W{iso[1]:02d}"
+            if (is_first_trading_day_of_week(today_str, hist_dates[:-1])
+                    and self.state.get("last_weekly_week") != week_key):
+                self.state["last_weekly_week"] = week_key
                 if pb_pct < 0.10:
                     qty = min(6, remaining_fen)
                     signals.append(_buy_signal("weekly_6", qty, close, pb_pct,
@@ -315,10 +326,8 @@ class Engine:
                 streak = count_exit_streak(self.hist, today_str)
                 self.state["exit_streak"] = streak
                 if streak >= 3:
-                    if self.state.get("reduced") and not ledger_state["has_reduced"]:
-                        exit_fen = current_fen - current_fen // 2
-                    else:
-                        exit_fen = current_fen
+                    # 清掉账本显示的全部当前持仓（ledger 即真相，无论之前是否减仓）
+                    exit_fen = current_fen
                     signals.append(dict(
                         type="exit",
                         fen=exit_fen,
@@ -364,7 +373,8 @@ def calc_warnings(hist: pd.DataFrame, today_str: str, state: dict,
     ma120  = float(row["ma120"])     if not pd.isna(row["ma120"])     else None
 
     band = config.get("warn_band_pp", 2) / 100.0
-    ls   = recalc_from_ledger(ledger, config.get("total_fen", 150))
+    ls   = recalc_from_ledger(ledger, config.get("total_fen", 150),
+                              state.get("cycle_start_date"))
     fp   = (close / ls["weighted_avg"] - 1) if ls["weighted_avg"] and close else None
 
     if pb_pct is not None:

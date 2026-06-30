@@ -46,8 +46,10 @@ def main():
     logger.info("计算移动均线…")
     hist = compute_mas(hist)
     if hist["pb_pct10y"].isna().any() or hist["pe_pct10y"].isna().any():
-        logger.info("部分分位缺失，本地兜底计算…")
-        hist = compute_percentiles(hist)
+        logger.info("部分分位缺失，仅对缺失行本地兜底（保留理杏仁官方分位）…")
+        local = compute_percentiles(hist)
+        hist["pb_pct10y"] = hist["pb_pct10y"].fillna(local["pb_pct10y"])
+        hist["pe_pct10y"] = hist["pe_pct10y"].fillna(local["pe_pct10y"])
     else:
         logger.info("已采用理杏仁官方近10年分位，无需本地计算")
 
@@ -84,7 +86,8 @@ def main():
     )
 
     # ── 6. 汇报 ──
-    ls = recalc_from_ledger(ledger, config.get("total_fen", 150))
+    ls = recalc_from_ledger(ledger, config.get("total_fen", 150),
+                            state.get("cycle_start_date"))
     latest = hist[hist["date"] == today].iloc[0] if today in hist["date"].values else None
     sep = "=" * 55
     print(f"\n{sep}")

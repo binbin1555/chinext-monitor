@@ -11,6 +11,13 @@ import pandas as pd
 from pathlib import Path
 from datetime import datetime
 
+# Windows 控制台默认 GBK，emoji/✓/▶ 会 UnicodeEncodeError——强制 UTF-8 输出
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 

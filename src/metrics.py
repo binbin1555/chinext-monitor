@@ -33,6 +33,7 @@ def build_nav_series(hist: pd.DataFrame, ledger: pd.DataFrame,
     # ── 组合净值 ──
     cash       = initial_cap
     holdings   = 0.0   # 持有点位份额（元/点）
+    held_fen   = 0     # 当前持仓份数（用于按"卖出前持仓"比例卖出）
     nav_port   = []
 
     # 按日期将流水映射
@@ -54,18 +55,20 @@ def build_nav_series(hist: pd.DataFrame, ledger: pd.DataFrame,
             fen    = int(lrow["fen"])
             price  = float(lrow["price"])
             amount = fen * (initial_cap / total_fen)  # 每份金额
-            shares = amount / price                    # 购入的指数份额（点为单位）
 
             if action == "buy":
                 cash     -= amount
-                holdings += shares
+                holdings += amount / price   # 购入的指数份额（点为单位）
+                held_fen += fen
             elif action in ("reduce", "exit"):
-                proceeds  = shares * price  # 实际卖出按当时流水价
-                # 按比例卖出
-                sell_shares = holdings * (fen / max(1, _current_holding_fen(ledger, d)))
-                proceeds    = sell_shares * price
-                cash       += proceeds
-                holdings   -= sell_shares
+                # 按"卖出前持仓份数"的比例卖出对应份额（分母必须是卖出前的持仓）
+                if held_fen > 0:
+                    sell_shares = holdings * (min(fen, held_fen) / held_fen)
+                else:
+                    sell_shares = 0.0
+                cash     += sell_shares * price   # 实际卖出按当时流水价
+                holdings -= sell_shares
+                held_fen  = max(0, held_fen - fen)
 
         # 利息（日化）
         daily_rate = (1 + cash_rate) ** (1 / 252) - 1
@@ -93,13 +96,6 @@ def build_nav_series(hist: pd.DataFrame, ledger: pd.DataFrame,
         "nav_benchmark": nav_bm,
     })
     return result
-
-
-def _current_holding_fen(ledger: pd.DataFrame, as_of_date: str) -> int:
-    """截至 as_of_date，持有的总份数（买 - 减 - 清）。"""
-    sub = ledger[ledger["date"] <= as_of_date]
-    return max(0, int(sub[sub["action"] == "buy"]["fen"].sum())
-               - int(sub[sub["action"].isin(["reduce", "exit"])]["fen"].sum()))
 
 
 def calc_performance(nav_series: pd.Series, start_date: str,
@@ -173,7 +169,7 @@ def calc_gaps(hist: pd.DataFrame, today_str: str, state: dict,
     ls = {}
     if ledger is not None and len(ledger) > 0:
         from src.engine import recalc_from_ledger
-        ls = recalc_from_ledger(ledger, total_fen)
+        ls = recalc_from_ledger(ledger, total_fen, state.get("cycle_start_date"))
     fp = (float(close) / ls.get("weighted_avg") - 1
           if ls.get("weighted_avg") and close else None)
 
