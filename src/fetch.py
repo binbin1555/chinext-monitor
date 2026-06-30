@@ -491,6 +491,26 @@ def update_history(config: dict, data_dir: Path):
         except Exception as e:
             logger.error(f"理杏仁拉取失败，使用缓存: {e}")
 
+    # ── 补填历史 close_300（种子数据导入时该列为空，一次性回填） ──
+    if token:
+        close_300_nulls = hist[hist["close_300"].isna()]
+        if len(close_300_nulls) > 0:
+            fill_start = close_300_nulls["date"].min()
+            fill_end   = close_300_nulls["date"].max()
+            bench_code = config.get("benchmark_code", "000300")
+            logger.info(f"补填 close_300: {fill_start} ~ {fill_end}，共 {len(close_300_nulls)} 行")
+            try:
+                c300_full = fetch_lixinger_close(token, bench_code, fill_start, fill_end)
+                filled = 0
+                for d, val in c300_full.items():
+                    idx = hist.index[hist["date"] == d]
+                    if len(idx) and pd.isna(hist.loc[idx[0], "close_300"]) and val is not None:
+                        hist.loc[idx, "close_300"] = val
+                        filled += 1
+                logger.info(f"close_300 补填完成，填入 {filled} 行")
+            except Exception as e:
+                logger.error(f"close_300 补填失败: {e}")
+
     # ── 重算均线；分位优先用理杏仁 cvpos，仅对种子数据中的 NaN 行本地兜底 ──
     hist = compute_mas(hist)
     if hist["pb_pct10y"].isna().any():
