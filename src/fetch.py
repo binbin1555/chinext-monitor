@@ -367,7 +367,13 @@ WINDOW_DAYS = 2430  # ≈ 10 年交易日
 
 
 def compute_percentiles(df: pd.DataFrame) -> pd.DataFrame:
-    """在 df 上原地计算 pb_pct10y 和 pe_pct10y（0~1）。"""
+    """
+    本地近似计算 pb_pct10y / pe_pct10y（0~1）。
+
+    ⚠️ 仅供【手动 bootstrap】使用，不参与自动流程：买卖主信号必须是理杏仁官方
+    cvpos，本地窗口仅覆盖 history.csv 内数据（早期样本不足会严重失真），不可用于
+    触发判断。update_history 缺分位时改为向理杏仁补拉官方值，补不到则保持为空。
+    """
     df = df.copy()
     pb_arr = df["pb"].values.astype(float)
     pe_arr = df["pe_ttm"].values.astype(float)
@@ -512,13 +518,38 @@ def update_history(config: dict, data_dir: Path):
             except Exception as e:
                 logger.error(f"close_300 补填失败: {e}")
 
-    # ── 重算均线；分位优先用理杏仁 cvpos，仅对【缺失行】本地兜底（不覆盖官方分位）──
+    # ── 重算均线 ──
     hist = compute_mas(hist)
-    if hist["pb_pct10y"].isna().any() or hist["pe_pct10y"].isna().any():
-        logger.info("部分行缺少官方分位，仅对缺失行本地兜底（保留理杏仁 cvpos）…")
-        local = compute_percentiles(hist)
-        hist["pb_pct10y"] = hist["pb_pct10y"].fillna(local["pb_pct10y"])
-        hist["pe_pct10y"] = hist["pe_pct10y"].fillna(local["pe_pct10y"])
+
+    # ── 分位缺失：向理杏仁补拉【官方 cvpos】（绝不用本地自算值污染买卖主信号）──
+    if token and (hist["pb_pct10y"].isna().any() or hist["pe_pct10y"].isna().any()):
+        miss       = hist[hist["pb_pct10y"].isna() | hist["pe_pct10y"].isna()]
+        fill_start = miss["date"].min()
+        fill_end   = miss["date"].max()
+        chinext_code = config.get("chinext_code", "399006")
+        logger.info(f"分位缺失 {len(miss)} 行，向理杏仁补拉官方分位 {fill_start} ~ {fill_end}")
+        try:
+            refetch = fetch_lixinger_fundamental(token, chinext_code, fill_start, fill_end)
+            filled = 0
+            for d, f in refetch.items():
+                idx = hist.index[hist["date"] == d]
+                if not len(idx):
+                    continue
+                i = idx[0]
+                if pd.isna(hist.loc[i, "pb_pct10y"]) and f.get("pb_pct10y") is not None:
+                    hist.loc[i, "pb_pct10y"] = f["pb_pct10y"]; filled += 1
+                if pd.isna(hist.loc[i, "pe_pct10y"]) and f.get("pe_pct10y") is not None:
+                    hist.loc[i, "pe_pct10y"] = f["pe_pct10y"]
+            logger.info(f"官方分位补拉完成，填入 {filled} 行")
+        except Exception as e:
+            logger.error(f"官方分位补拉失败: {e}")
+
+    # 仍缺官方分位的行【保持为空(NaN)，绝不本地自算】——引擎遇空会跳过当日评估，
+    # main.py 据此发 Bark 告警提示手动核对（操作手册附录 E3）。
+    still = hist[hist["pb_pct10y"].isna()]
+    if len(still) > 0:
+        logger.warning(f"仍有 {len(still)} 行无官方 PB 分位，保持为空（不自算）；"
+                       f"最新缺失日期 {still['date'].max()}")
 
     # ── 更新今日温度（若有 key） ──
     if qkey:

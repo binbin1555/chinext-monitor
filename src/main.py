@@ -138,6 +138,22 @@ def main():
         logger.info("--fetch-only 模式，数据已更新")
         return
 
+    # ── Step 2.6：今日官方 PB 分位缺失 → 告警并跳过引擎（绝不用近似值触发买卖）──
+    _today_row = hist[hist["date"] == today_str]
+    if len(_today_row) and pd.isna(_today_row.iloc[0]["pb_pct10y"]):
+        logger.warning(f"今日（{today_str}）官方 PB 分位缺失，跳过引擎评估")
+        if (not args.no_push and not args.report_only
+                and state.get("last_pct_missing_alert") != today_str):
+            notifier.send_error(
+                f"⚠️ 今日（{today_str}）理杏仁官方 PB 分位缺失\n"
+                f"为避免用近似值误触发，引擎已跳过本日买卖评估。\n"
+                f"请手动核对（中证指数官网/东方财富），或确认理杏仁数据是否已补全。"
+            )
+            state["last_pct_missing_alert"] = today_str
+            save_state(state)
+        _update_dashboard(hist, state, ledger, config, docs_dir)
+        return
+
     total_fen = config.get("total_fen", 150)
 
     # ── Step 2.4：轮次重置（上一轮已全清仓并回填 → 自动开启新一轮）──

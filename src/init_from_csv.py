@@ -15,7 +15,7 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 import yaml
-from src.fetch    import load_seed_from_local, compute_percentiles, compute_mas, HISTORY_COLS
+from src.fetch    import load_seed_from_local, compute_mas, HISTORY_COLS
 from src.engine   import recalc_from_ledger
 from src.metrics  import build_nav_series, calc_performance, calc_gaps
 from src.dashboard import generate_data_json
@@ -45,13 +45,12 @@ def main():
     # ── 2. 计算均线；分位优先用理杏仁官方"分位点"列，仅缺失才本地兜底 ──
     logger.info("计算移动均线…")
     hist = compute_mas(hist)
-    if hist["pb_pct10y"].isna().any() or hist["pe_pct10y"].isna().any():
-        logger.info("部分分位缺失，仅对缺失行本地兜底（保留理杏仁官方分位）…")
-        local = compute_percentiles(hist)
-        hist["pb_pct10y"] = hist["pb_pct10y"].fillna(local["pb_pct10y"])
-        hist["pe_pct10y"] = hist["pe_pct10y"].fillna(local["pe_pct10y"])
+    n_missing = int(hist["pb_pct10y"].isna().sum() + hist["pe_pct10y"].isna().sum())
+    if n_missing:
+        logger.warning(f"种子数据有 {n_missing} 处分位缺失，保持为空（不本地自算）；"
+                       f"接入 API 后由 main.py 向理杏仁补拉官方值")
     else:
-        logger.info("已采用理杏仁官方近10年分位，无需本地计算")
+        logger.info("已采用理杏仁官方近10年分位")
 
     # ── 3. 保存 history.csv ──
     data_dir.mkdir(parents=True, exist_ok=True)
