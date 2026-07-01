@@ -1618,6 +1618,33 @@ class GitHubSyncer {
     const r = await fetch(url, {method:'POST', headers, body:JSON.stringify({ref:'main', inputs:{no_push:'true'}})});
     if (!r.ok) { const e=await r.json().catch(()=>({})); throw new Error(`触发重算失败 ${r.status}: ${e.message||''}`); }
   }
+
+  // 把"已确认/跳过"的信号写入仓库 acknowledged.json（读-改-写），使其跨设备生效
+  async appendAcknowledged(sig) {
+    const {owner, repo, pat} = this.cfg;
+    if (!owner||!repo||!pat) throw new Error('未配置 GitHub 同步');
+    const base = `https://api.github.com/repos/${owner}/${repo}/contents/acknowledged.json`;
+    const headers = {'Authorization':`token ${pat}`, 'Accept':'application/vnd.github.v3+json','Content-Type':'application/json'};
+    let sha, list = [];
+    const get = await fetch(base, {headers});
+    if (get.ok) {
+      const j = await get.json(); sha = j.sha;
+      try { list = JSON.parse(decodeURIComponent(escape(atob((j.content||'').replace(/\n/g,''))))) || []; }
+      catch(e) { list = []; }
+    } else if (get.status !== 404) {
+      throw new Error(`读取 acknowledged.json 失败 ${get.status}`);
+    }
+    const key = sig.type + '_' + sig.date;
+    if (!list.some(x => (x.key || (x.type+'_'+x.date)) === key)) {
+      list.push({key, type: sig.type, date: sig.date, fen: sig.fen, ts: new Date().toISOString()});
+    }
+    const bytes = new TextEncoder().encode(JSON.stringify(list));
+    const b64 = btoa(Array.from(bytes, b => String.fromCharCode(b)).join(''));
+    const body = {message:`ack ${key}`, content:b64};
+    if (sha) body.sha = sha;
+    const put = await fetch(base, {method:'PUT', headers, body:JSON.stringify(body)});
+    if (!put.ok) { const e=await put.json().catch(()=>({})); throw new Error(e.message||`确认提交失败 ${put.status}`); }
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1735,8 +1762,30 @@ function renderPendingSignals() {
       <div class="pc-detail">${esc(s.reason)}</div>
       <div class="pc-meta">信号日期 ${s.date} · 建议 ${s.fen} 份 · 参考点位 ${s.price?.toFixed(0)||'--'}</div>
       <button class="btn-sm btn-fill-sm" onclick="prefillForm(this)">记录我的成交</button>
-      <button class="btn-sm btn-text-sm" style="margin-left:6px;color:var(--text3)" onclick="this.parentElement.style.opacity='.4'">稍后</button>
+      <button class="btn-sm btn-text-sm" style="margin-left:6px;color:var(--text3)" onclick="ackFromCard(this)">跳过 / 已处理</button>
     </div>`).join('');
+}
+
+// 一键"已确认/跳过"——无论你照做、调整份数、还是决定不做，都清掉这条提醒
+function ackFromCard(btn) {
+  const sig = JSON.parse(btn.closest('.pending-card').dataset.sig);
+  acknowledgeSignal(sig);
+}
+async function acknowledgeSignal(sig) {
+  markSignalActed(sig);               // 本设备立即隐藏
+  renderPendingSignals();
+  updateFabBadge();
+  if (GH.ok()) {
+    try {
+      await GH.appendAcknowledged(sig);                                   // 写入仓库，跨设备生效
+      try { await GH.triggerWorkflow(); } catch(e) { console.warn('触发重算失败(非致命):', e); }
+      showToast('已确认 · 跨设备生效（仪表盘约3分钟后刷新）');
+    } catch(err) {
+      showToast('已在本设备隐藏；跨设备同步失败：' + err.message);
+    }
+  } else {
+    showToast('已在本设备隐藏（配置 GitHub 同步后可跨设备生效）');
+  }
 }
 
 let _activePendingSignal = null;
@@ -2007,11 +2056,13 @@ function initPanel() {
       price:  document.getElementById('f-price').value,
       note:   document.getElementById('f-note').value,
     });
-    // 标记信号已处理，卡片立即消失
+    // 标记信号已处理，卡片立即消失；并跨设备确认（覆盖"调整了份数"的情况）
     if (_activePendingSignal) {
-      markSignalActed(_activePendingSignal);
+      const sig = _activePendingSignal;
       _activePendingSignal = null;
+      markSignalActed(sig);
       renderPendingSignals();
+      if (GH.ok()) { GH.appendAcknowledged(sig).catch(e => console.warn('确认写入失败(非致命):', e)); }
     }
     // 清空份数/备注，重新 autofill 价格
     document.getElementById('f-fen').value  = '';

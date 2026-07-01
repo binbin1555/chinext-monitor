@@ -14,6 +14,28 @@ logger = logging.getLogger(__name__)
 NaN_SAFE = lambda v: None if (v is None or (isinstance(v, float) and np.isnan(v))) else v
 
 
+def load_acknowledged_keys(root_dir) -> set:
+    """
+    读取 acknowledged.json（用户在看板点"跳过/已处理"写入仓库的确认清单），
+    返回 {"类型_日期"} 键集合。用于把已确认的待执行信号从提醒中移除——
+    无论用户是照做、调整份数、还是决定跳过，都能跨设备清掉提醒。
+    """
+    path = Path(root_dir) / "acknowledged.json"
+    if not path.exists():
+        return set()
+    try:
+        data = json.load(open(path, encoding="utf-8"))
+    except Exception:
+        return set()
+    keys = set()
+    for e in (data or []):
+        if isinstance(e, dict):
+            keys.add(e.get("key") or f"{e.get('type','')}_{e.get('date','')}")
+        elif isinstance(e, str):
+            keys.add(e)
+    return keys
+
+
 def generate_data_json(
     hist: pd.DataFrame,
     state: dict,
@@ -96,6 +118,11 @@ def generate_data_json(
 
     next_action = _next_action_hint(state, th, today_row, config)
 
+    # 过滤掉用户已在看板"跳过/已处理"的信号（跨设备生效）
+    ack_keys = load_acknowledged_keys(docs_dir.parent)
+    pending_list = [s for s in state.get("signals_pending", [])
+                    if f"{s.get('type','')}_{s.get('date','')}" not in ack_keys]
+
     data = {
         "last_update": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "start_date":  start_date,
@@ -138,8 +165,8 @@ def generate_data_json(
             "t1_fired":           state.get("t1_fired", False),
             "t2_fired":           state.get("t2_fired", False),
             "t3_fired":           state.get("t3_fired", False),
-            "pending_signals":      len(state.get("signals_pending", [])),
-            "pending_signals_list": state.get("signals_pending", []),
+            "pending_signals":      len(pending_list),
+            "pending_signals_list": pending_list,
             "initial_capital":      float(config.get("initial_capital", 2_000_000)),
         },
         "metrics": {
