@@ -11,7 +11,7 @@
   "observation_entered": true,
   "exit_streak": 0,
   "signals_pending": [],
-  "last_successful_run": "2026-06-30",
+  "last_successful_run": "2026-07-01",
   "phase": "holding",
   "_note": "本文件由引擎每日自动更新并 commit，勿手动修改逻辑字段。如需重置，运行 python src/backtest.py --reset",
   "cycle_buys": [
