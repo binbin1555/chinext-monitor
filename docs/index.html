@@ -383,6 +383,12 @@
   }
   .btn-fill-sm { background:var(--green); color:#fff; }
   .btn-text-sm { background:transparent; color:var(--text2); }
+  /* 卖出类=强提醒：红色、更粗左条、红底、永不过期 */
+  .pending-card.sell { border-left:4px solid var(--red); background:rgba(224,57,43,.07); }
+  .pending-card.sell .pc-type { color:var(--red); }
+  .pending-card.sell .btn-fill-sm { background:var(--red); }
+  .pc-urgent { display:inline-block; margin-left:8px; padding:1px 7px; border-radius:6px;
+    background:var(--red); color:#fff; font-size:10px; font-weight:700; vertical-align:1px; }
 
   /* 新增表单 */
   .form-section-title {
@@ -1756,14 +1762,17 @@ function renderPendingSignals() {
     weekly_6:'周定投（6份）', weekly_3:'周定投（3份）',
     rightside:'右侧补仓', reduce:'减仓50%', exit:'全部清仓',
   };
-  list.innerHTML = signals.map(s => `
-    <div class="pending-card" data-sig='${JSON.stringify(s).replace(/'/g,"&apos;")}'>
-      <div class="pc-type">${typeLabel[s.type]||s.type}</div>
+  list.innerHTML = signals.map(s => {
+    const isSell = s.type === 'reduce' || s.type === 'exit';
+    return `
+    <div class="pending-card${isSell ? ' sell' : ''}" data-sig='${JSON.stringify(s).replace(/'/g,"&apos;")}'>
+      <div class="pc-type">${typeLabel[s.type]||s.type}${isSell ? '<span class="pc-urgent">强提醒 · 不过期</span>' : ''}</div>
       <div class="pc-detail">${esc(s.reason)}</div>
       <div class="pc-meta">信号日期 ${s.date} · 建议 ${s.fen} 份 · 参考点位 ${s.price?.toFixed(0)||'--'}</div>
       <button class="btn-sm btn-fill-sm" onclick="prefillForm(this)">记录我的成交</button>
-      <button class="btn-sm btn-text-sm" style="margin-left:6px;color:var(--text3)" onclick="ackFromCard(this)">跳过 / 已处理</button>
-    </div>`).join('');
+      <button class="btn-sm btn-text-sm" style="margin-left:6px;color:var(--text3)" onclick="ackFromCard(this)">${isSell ? '已处理' : '跳过 / 已处理'}</button>
+    </div>`;
+  }).join('');
 }
 
 // 一键"已确认/跳过"——无论你照做、调整份数、还是决定不做，都清掉这条提醒

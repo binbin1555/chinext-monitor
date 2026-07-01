@@ -31,7 +31,7 @@ from src.engine   import (Engine, recalc_from_ledger, calc_warnings,
                            theoretical_position, bootstrap_cycle_from_history)
 from src.metrics  import build_nav_series, calc_performance, calc_gaps
 from src.notify   import BarkNotifier
-from src.dashboard import generate_data_json, load_acknowledged_keys
+from src.dashboard import generate_data_json, load_acknowledged_keys, filter_pending_signals
 
 logging.basicConfig(
     level=logging.INFO,
@@ -221,16 +221,15 @@ def main():
             logger.info(f"已核对 {len(state['signals_pending'])-len(cleaned)} 条已回填信号")
         state["signals_pending"] = cleaned
 
-    # 叠加：用户在看板点过"跳过/已处理"的信号，永久移除（无论照做/调整/跳过）
+    # 叠加过滤：已确认/跳过的移除、买入类超期移除、卖出类永不过期（跨设备生效，无需 PAT）
     if state.get("signals_pending"):
         ack_keys = load_acknowledged_keys(ROOT)
         before = len(state["signals_pending"])
-        state["signals_pending"] = [
-            s for s in state["signals_pending"]
-            if f"{s.get('type','')}_{s.get('date','')}" not in ack_keys
-        ]
+        state["signals_pending"] = filter_pending_signals(
+            state["signals_pending"], hist["date"].tolist(), hist["date"].max(),
+            ack_keys, int(config.get("pending_expire_trading_days", 7)))
         if len(state["signals_pending"]) < before:
-            logger.info(f"已移除 {before - len(state['signals_pending'])} 条用户已确认/跳过的信号")
+            logger.info(f"已移除 {before - len(state['signals_pending'])} 条(已确认/买入超期)信号")
 
     # ── Step 3-8：引擎 + 推送 + 日报（统一异常兜底，失败即 Bark 告警）──
     try:

@@ -7,3 +7,4 @@ chinext_code: "399006"          # 创业板指
 run_hour_utc: 8                 # 每日运行时间 UTC（北京16:00收盘后约8:30 UTC+8=0:30 UTC次日，或根据需求调整）
 warn_band_pp: 2                 # 临近预警带宽（百分点），如 PB分位 12% 时预警 T3(<10%)
 history_years: 11               # 拉取历史年数（≥10年，留冗余）
+pending_expire_trading_days: 7  # 买入类提醒超过 N 个交易日未处理自动消失；卖出类永不过期

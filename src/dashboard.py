@@ -36,6 +36,30 @@ def load_acknowledged_keys(root_dir) -> set:
     return keys
 
 
+BUY_TYPES = {"T1", "T2", "T3", "weekly_3", "weekly_6", "rightside"}
+
+
+def filter_pending_signals(pending, hist_dates, latest_date, ack_keys, expire_buy_days):
+    """
+    过滤待执行提醒：
+      - 用户已点"跳过/已处理"（在 ack_keys 中）→ 移除；
+      - 买入类提醒距今超过 expire_buy_days 个交易日 → 自动过期移除；
+      - 卖出类提醒（reduce/exit）【永不过期】，是强提醒，只有点"已处理"才消失。
+    """
+    kept = []
+    for s in (pending or []):
+        key = f"{s.get('type','')}_{s.get('date','')}"
+        if key in ack_keys:
+            continue
+        if s.get("type") in BUY_TYPES and expire_buy_days and expire_buy_days > 0:
+            sig_date = s.get("date", "")
+            elapsed = sum(1 for d in hist_dates if sig_date < d <= latest_date)
+            if elapsed >= expire_buy_days:
+                continue
+        kept.append(s)
+    return kept
+
+
 def generate_data_json(
     hist: pd.DataFrame,
     state: dict,
@@ -118,10 +142,13 @@ def generate_data_json(
 
     next_action = _next_action_hint(state, th, today_row, config)
 
-    # 过滤掉用户已在看板"跳过/已处理"的信号（跨设备生效）
-    ack_keys = load_acknowledged_keys(docs_dir.parent)
-    pending_list = [s for s in state.get("signals_pending", [])
-                    if f"{s.get('type','')}_{s.get('date','')}" not in ack_keys]
+    # 过滤待执行：已确认的移除、买入类超期移除、卖出类永不过期（跨设备生效，无需 PAT）
+    ack_keys   = load_acknowledged_keys(docs_dir.parent)
+    hist_dates = hist["date"].tolist()
+    latest     = hist["date"].max() if len(hist) else ""
+    expire_days = int(config.get("pending_expire_trading_days", 7))
+    pending_list = filter_pending_signals(state.get("signals_pending", []),
+                                          hist_dates, latest, ack_keys, expire_days)
 
     data = {
         "last_update": datetime.now().strftime("%Y-%m-%d %H:%M"),
