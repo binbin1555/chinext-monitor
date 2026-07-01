@@ -67,8 +67,9 @@ def run_backtest(hist: pd.DataFrame, config: dict,
         "fen_size": initial_capital / total_fen,
         "t1_fired": False, "t2_fired": False, "t3_fired": False,
         "rightside_used": False,
-        "armed": False, "reduced": False,
+        "armed": False, "reduced": False, "exited": False,
         "observation_entered": False, "exit_streak": 0,
+        "cycle_buys": [], "cycle_sold_fen": 0,
         "signals_pending": [], "phase": "waiting",
     }
 
@@ -134,8 +135,9 @@ def run_backtest(hist: pd.DataFrame, config: dict,
                     "fen_size": initial_capital / total_fen,
                     "t1_fired": False, "t2_fired": False, "t3_fired": False,
                     "rightside_used": False,
-                    "armed": False, "reduced": False,
+                    "armed": False, "reduced": False, "exited": False,
                     "observation_entered": False, "exit_streak": 0,
+                    "cycle_buys": [], "cycle_sold_fen": 0,
                     "signals_pending": [], "phase": "waiting",
                 }
 

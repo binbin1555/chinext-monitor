@@ -551,7 +551,7 @@
           </div>
         </div>
         <div class="daily-right">
-          <div class="stat-label">当前浮盈</div>
+          <div class="stat-label">当前浮盈 · 策略</div>
           <div class="stat-value" id="kpi-profit">--</div>
           <div class="profit-yuan" id="kpi-profit-yuan"></div>
         </div>
@@ -919,15 +919,17 @@ function renderKPIs(d) {
   dpEl.textContent = dailyPct != null ? (dailyPct >= 0 ? '+' : '') + pct(dailyPct) : '--';
   setColor(dpEl, dailyPct);
 
-  // 浮盈：正=红（赚钱），负=绿（亏钱）
+  // 浮盈：主数字=策略理论浮盈（驱动减仓/止盈信号，不受你手动记账影响）
   const fp = s.float_profit;
   const pfEl = document.getElementById('kpi-profit');
   pfEl.textContent = pct(fp);
   setColor(pfEl, fp);
-  // 浮盈金额
-  const fpYuan = (fp != null) ? (s.current_fen || 0) * price_per_fen * fp : null;
+  // 副行=你的实盘浮盈与金额（来自 ledger，仅供参考，不影响任何信号）
+  const afp  = (s.actual_float_profit != null) ? s.actual_float_profit : fp;
+  const afen = (s.actual_current_fen  != null) ? s.actual_current_fen  : (s.current_fen || 0);
+  const fpYuan = (afp != null) ? afen * price_per_fen * afp : null;
   const pyEl = document.getElementById('kpi-profit-yuan');
-  pyEl.textContent = fmtYuan(fpYuan);
+  pyEl.textContent = (afp != null ? `实盘 ${pct(afp)}　` : '') + (fpYuan != null ? fmtYuan(fpYuan) : '');
   setColor(pyEl, fpYuan);
 
   // CAGR：正=红，负=绿

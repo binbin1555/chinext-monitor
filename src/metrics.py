@@ -166,10 +166,9 @@ def calc_gaps(hist: pd.DataFrame, today_str: str, state: dict,
     ma120   = row["ma120"]     if not pd.isna(row["ma120"])     else None
     total_fen = config.get("total_fen", 150)
 
-    ls = {}
-    if ledger is not None and len(ledger) > 0:
-        from src.engine import recalc_from_ledger
-        ls = recalc_from_ledger(ledger, total_fen, state.get("cycle_start_date"))
+    # 缺口（距减仓/距止盈）基于【策略理论账本】，与引擎信号时机口径一致
+    from src.engine import theoretical_position
+    ls = theoretical_position(state, total_fen)
     fp = (float(close) / ls.get("weighted_avg") - 1
           if ls.get("weighted_avg") and close else None)
 

@@ -14,5 +14,55 @@
   "last_successful_run": "2026-06-30",
   "phase": "holding",
   "_note": "本文件由引擎每日自动更新并 commit，勿手动修改逻辑字段。如需重置，运行 python src/backtest.py --reset",
+  "cycle_buys": [
+    {
+      "date": "2023-04-24",
+      "fen": 3,
+      "price": 2301.24
+    },
+    {
+      "date": "2023-04-24",
+      "fen": 30,
+      "price": 2301.24
+    },
+    {
+      "date": "2023-04-25",
+      "fen": 20,
+      "price": 2259.19
+    },
+    {
+      "date": "2023-05-04",
+      "fen": 3,
+      "price": 2297.67
+    },
+    {
+      "date": "2023-05-08",
+      "fen": 3,
+      "price": 2273.4
+    },
+    {
+      "date": "2023-05-15",
+      "fen": 3,
+      "price": 2299.93
+    },
+    {
+      "date": "2023-05-22",
+      "fen": 3,
+      "price": 2280.15
+    },
+    {
+      "date": "2023-05-29",
+      "fen": 3,
+      "price": 2203.84
+    },
+    {
+      "date": "2023-05-31",
+      "fen": 82,
+      "price": 2193.41
+    }
+  ],
+  "cycle_sold_fen": 0,
+  "exited": false,
+  "last_weekly_week": "2023-W22",
   "trigger_log": []
 }

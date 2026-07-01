@@ -27,7 +27,8 @@ for _s in (sys.stdout, sys.stderr):
 
 import yaml
 from src.fetch    import update_history
-from src.engine   import Engine, recalc_from_ledger, calc_warnings
+from src.engine   import (Engine, recalc_from_ledger, calc_warnings,
+                           theoretical_position, bootstrap_cycle_from_history)
 from src.metrics  import build_nav_series, calc_performance, calc_gaps
 from src.notify   import BarkNotifier
 from src.dashboard import generate_data_json
@@ -155,32 +156,43 @@ def main():
         return
 
     total_fen = config.get("total_fen", 150)
-
-    # ── Step 2.4：轮次重置（上一轮已全清仓并回填 → 自动开启新一轮）──
     cyc_start = state.get("cycle_start_date") or config.get("start_date", "2023-01-01")
     state["cycle_start_date"] = cyc_start
-    _ls = recalc_from_ledger(ledger, total_fen, cyc_start)
-    if _ls["has_exited"] and _ls["current_fen"] == 0 and _ls["total_bought"] > 0:
-        cyc_rows   = ledger[ledger["date"] >= cyc_start]
-        last_trade = cyc_rows["date"].max()
+
+    # ── Step 2.3：迁移——若无策略理论账本，从历史确定性重建（一次性，不依赖 ledger）──
+    if "cycle_buys" not in state:
+        bs = bootstrap_cycle_from_history(hist, config, cyc_start)
+        state["cycle_buys"]     = bs["cycle_buys"]
+        state["cycle_sold_fen"] = bs["cycle_sold_fen"]
+        state.setdefault("exited", bs.get("exited", False))
+        state.setdefault("last_weekly_week", bs.get("last_weekly_week"))
+        logger.info(f"迁移：重建策略理论账本 {len(state['cycle_buys'])} 笔买入")
+        save_state(state)
+
+    # ── Step 2.4：轮次重置（引擎自身已全清仓 → 自动开启新一轮，不看用户 ledger）──
+    _pos = theoretical_position(state, total_fen)
+    if state.get("exited") and _pos["current_fen"] == 0 and _pos["total_bought"] > 0:
+        old_cycle  = state.get("cycle_id", 1)
+        last_trade = state.get("exit_date") or today_str
         new_start  = (datetime.strptime(last_trade, "%Y-%m-%d")
                       + timedelta(days=1)).strftime("%Y-%m-%d")
-        old_cycle  = state.get("cycle_id", 1)
         state.setdefault("completed_cycles", []).append(
-            {"cycle_id": old_cycle, "start": cyc_start, "end": last_trade})
+            {"cycle_id": old_cycle, "start": cyc_start, "end": last_trade,
+             "avg": round(_pos["weighted_avg"], 2) if _pos["weighted_avg"] else None})
         state.update({
             "cycle_id": old_cycle + 1,
             "cycle_start_date": new_start,
             "t1_fired": False, "t2_fired": False, "t3_fired": False,
             "rightside_used": False, "armed": False, "reduced": False,
-            "observation_entered": False, "exit_streak": 0,
+            "exited": False, "observation_entered": False, "exit_streak": 0,
+            "cycle_buys": [], "cycle_sold_fen": 0,
             "last_weekly_week": None, "phase": "waiting",
         })
         logger.info(f"上一轮(第{old_cycle}轮)已清仓，开启第{state['cycle_id']}轮，"
                     f"cycle_start_date={new_start}")
         if not args.no_push:
             notifier.send_info(
-                f"🔄 第{old_cycle}轮已全部清仓并回填",
+                f"🔄 第{old_cycle}轮已全部止盈清仓",
                 f"系统已重置，开启第{state['cycle_id']}轮建仓监测。")
         save_state(state)
 
@@ -219,9 +231,9 @@ def main():
         state   = engine.state
         warnings = calc_warnings(hist, today_str, state, ledger, config)
 
-        # Step 4：推送信号
+        # Step 4：推送信号（"已买X/150"用策略理论进度，与信号口径一致）
         if not args.no_push:
-            ls = recalc_from_ledger(ledger, total_fen, cyc_start)
+            ls = theoretical_position(state, total_fen)
             for sig in signals:
                 notifier.send_signal(sig, today_str,
                                       ls.get("total_bought", 0), total_fen)
@@ -252,9 +264,9 @@ def main():
         # Step 6：更新仪表盘数据
         _update_dashboard(hist, state, ledger, config, docs_dir, warnings=warnings)
 
-        # Step 7：发日报
+        # Step 7：发日报（持仓/浮盈用策略理论账本，与信号口径一致）
         if not args.no_push:
-            ls     = recalc_from_ledger(ledger, total_fen, cyc_start)
+            ls     = theoretical_position(state, total_fen)
             nav_df = build_nav_series(hist, ledger, config, state)
             nav_arr = nav_df["nav_portfolio"].tolist() if len(nav_df) > 0 else [1.0]
             perf  = calc_performance(

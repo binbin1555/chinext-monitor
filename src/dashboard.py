@@ -77,21 +77,24 @@ def generate_data_json(
                 exit_signals.append({"date": d, "value": price})
 
     # ── 当前状态摘要 ──
-    from src.engine import recalc_from_ledger
+    # th = 策略理论账本（驱动信号/缺口）；ls = 用户实盘账本（仅显示实际盈亏，不参与信号）
+    from src.engine import recalc_from_ledger, theoretical_position
+    th = theoretical_position(state, config.get("total_fen", 150))
     ls = recalc_from_ledger(ledger, config.get("total_fen", 150),
                             state.get("cycle_start_date"))
     today_row = hist.iloc[-1] if len(hist) > 0 else None
     cur_close = float(today_row["close"]) if today_row is not None and not pd.isna(today_row["close"]) else None
-    float_profit = None
-    if ls.get("weighted_avg") and cur_close:
-        float_profit = round(cur_close / ls["weighted_avg"] - 1, 4)
+    def _fp(avg):
+        return round(cur_close / avg - 1, 4) if avg and cur_close else None
+    float_profit = _fp(th.get("weighted_avg"))   # 策略理论浮盈（驱动信号）
+    actual_fp    = _fp(ls.get("weighted_avg"))   # 用户实盘浮盈（仅显示）
 
     phase_label = {
         "waiting": "空仓等待",
         "holding": "建仓 / 持有中",
     }.get(state.get("phase", ""), state.get("phase", ""))
 
-    next_action = _next_action_hint(state, ls, today_row, config)
+    next_action = _next_action_hint(state, th, today_row, config)
 
     data = {
         "last_update": datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -118,12 +121,17 @@ def generate_data_json(
             "phase":              state.get("phase", "waiting"),
             "phase_label":        phase_label,
             "next_action":        next_action,
-            "current_fen":        ls.get("current_fen", 0),
+            "current_fen":        th.get("current_fen", 0),
             "total_fen":          config.get("total_fen", 150),
-            "total_bought":       ls.get("total_bought", 0),
-            "weighted_avg":       round(ls["weighted_avg"], 2) if ls.get("weighted_avg") else None,
+            "total_bought":       th.get("total_bought", 0),
+            "weighted_avg":       round(th["weighted_avg"], 2) if th.get("weighted_avg") else None,
             "current_close":      cur_close,
             "float_profit":       float_profit,
+            # 用户实盘（仅供显示，不参与任何信号判断）
+            "actual_current_fen":  ls.get("current_fen", 0),
+            "actual_total_bought": ls.get("total_bought", 0),
+            "actual_weighted_avg": round(ls["weighted_avg"], 2) if ls.get("weighted_avg") else None,
+            "actual_float_profit": actual_fp,
             "armed":              state.get("armed", False),
             "observation_entered": state.get("observation_entered", False),
             "exit_streak":        state.get("exit_streak", 0),

@@ -65,6 +65,29 @@ def recalc_from_ledger(ledger: pd.DataFrame, total_fen: int = 150,
     )
 
 
+def theoretical_position(state: dict, total_fen: int = 150) -> dict:
+    """
+    引擎自维护的【策略理论账本】——完全由触发信号（按触发日收盘价）构成，
+    不读用户 ledger.csv。买卖信号的时机（含减仓/止盈）一律基于它，
+    因此【不受用户忘记记账、漏记、或临场微调买卖的影响】。
+    结构与 recalc_from_ledger 对齐，供引擎/缺口/预警的决策使用。
+    ledger.csv 仅用于在看板显示用户的实际盈亏，绝不参与信号判断。
+    """
+    buys   = state.get("cycle_buys", []) or []
+    bought = sum(int(b["fen"]) for b in buys)
+    sold   = int(state.get("cycle_sold_fen", 0) or 0)
+    avg    = (sum(int(b["fen"]) * float(b["price"]) for b in buys) / bought
+              if bought > 0 else None)
+    return dict(
+        total_bought=bought,
+        total_sold=sold,
+        current_fen=max(0, bought - sold),
+        weighted_avg=avg,
+        has_reduced=bool(state.get("reduced")),
+        has_exited=bool(state.get("exited")),
+    )
+
+
 # ─────────────────────────────────────────────
 # 辅助：交易日判断
 # ─────────────────────────────────────────────
@@ -206,11 +229,14 @@ class Engine:
             logger.warning(f"{today_str} 数据不完整（close={close}, pb_pct={pb_pct}），跳过")
             return []
 
-        ledger_state = recalc_from_ledger(self.ledger, self.total_fen,
-                                          self.state.get("cycle_start_date"))
-        total_bought  = ledger_state["total_bought"]
-        current_fen   = ledger_state["current_fen"]
-        weighted_avg  = ledger_state["weighted_avg"]
+        # 决策全部基于【策略理论账本】（cycle_buys / cycle_sold_fen），不读用户 ledger，
+        # 故减仓/止盈时机不受用户手动记账、漏记、临场微调的影响。
+        self.state.setdefault("cycle_buys", [])
+        self.state.setdefault("cycle_sold_fen", 0)
+        pos = theoretical_position(self.state, self.total_fen)
+        total_bought  = pos["total_bought"]
+        current_fen   = pos["current_fen"]
+        weighted_avg  = pos["weighted_avg"]
         remaining_fen = self.total_fen - total_bought
 
         float_profit  = (close / weighted_avg - 1.0) if weighted_avg else None
@@ -218,9 +244,8 @@ class Engine:
         signals = []
         hist_dates = list(self.hist[self.hist["date"] <= today_str]["date"])
 
-        # ── 已全清仓：等待下一轮 ──
-        if ledger_state["has_exited"] and current_fen == 0:
-            # 新轮次由 main.py 在清仓确认后重置 state
+        # ── 已全清仓：等待下一轮（由 main.py 检测 exited 后重置 state）──
+        if self.state.get("exited") and current_fen == 0:
             return []
 
         # ══════════════════════════════════════════
@@ -283,6 +308,13 @@ class Engine:
                                                "右侧补仓：MA120上行且连续3日站上MA120", "timeSensitive"))
                     self.state["rightside_used"] = True
 
+        # 把本日触发的买入按当日收盘价记入【策略理论账本】。本日卖出评估仍用日初持仓
+        # （current_fen/weighted_avg/float_profit 为日初快照），与"信号发出、账本次日更新"一致。
+        for _s in signals:
+            if _s["type"] in ("weekly_6", "weekly_3", "T1", "T2", "T3", "rightside"):
+                self.state["cycle_buys"].append(
+                    {"date": today_str, "fen": int(_s["fen"]), "price": float(close)})
+
         # ══════════════════════════════════════════
         # 卖出规则（第 4.3 节）——只在有持仓时评估
         # ══════════════════════════════════════════
@@ -320,13 +352,14 @@ class Engine:
                         level="timeSensitive",
                     ))
                     self.state["reduced"] = True
+                    self.state["cycle_sold_fen"] = self.state.get("cycle_sold_fen", 0) + qty
 
             # 全部止盈（武装后 MA120 连续 3 日掉头）
             if self.state.get("armed") and ma120 is not None:
                 streak = count_exit_streak(self.hist, today_str)
                 self.state["exit_streak"] = streak
                 if streak >= 3:
-                    # 清掉账本显示的全部当前持仓（ledger 即真相，无论之前是否减仓）
+                    # 清掉理论账本的全部当前持仓
                     exit_fen = current_fen
                     signals.append(dict(
                         type="exit",
@@ -335,12 +368,16 @@ class Engine:
                         reason=f"已武装 + 收盘连续{streak}日低于MA120且MA120下行，全部止盈",
                         level="timeSensitive",
                     ))
-                    self.state["phase"] = "waiting"
+                    self.state["cycle_sold_fen"] = self.state.get("cycle_sold_fen", 0) + exit_fen
+                    self.state["exited"]    = True
+                    self.state["exit_date"] = today_str
+                    self.state["phase"]     = "waiting"
 
-        # ── 更新阶段标签 ──
-        if current_fen > 0:
+        # ── 更新阶段标签（用含本日买入的最新理论持仓）──
+        pos2 = theoretical_position(self.state, self.total_fen)
+        if pos2["current_fen"] > 0:
             self.state["phase"] = "holding"
-        elif total_bought == 0:
+        elif pos2["total_bought"] == 0:
             self.state["phase"] = "waiting"
         # 清仓后 phase 已在上面设为 waiting
 
@@ -351,6 +388,33 @@ class Engine:
 def _buy_signal(sig_type, fen, price, pb_pct, reason, level):
     return dict(type=sig_type, fen=fen, price=price, pb_pct=pb_pct,
                 reason=reason, level=level)
+
+
+def bootstrap_cycle_from_history(hist: pd.DataFrame, config: dict,
+                                 cycle_start_date: str) -> dict:
+    """
+    从 cycle_start_date 起【确定性重放】策略，重建本轮的策略理论账本(cycle_buys /
+    cycle_sold_fen)与全部状态标志。用途：把旧 state（无理论账本）一次性迁移过来，
+    完全不依赖用户 ledger。重放到本轮清仓点（若历史中已清仓）或最新数据为止。
+    """
+    total_fen = int(config.get("total_fen", 150))
+    state = {
+        "cycle_id": 1, "cycle_start_date": cycle_start_date,
+        "t1_fired": False, "t2_fired": False, "t3_fired": False,
+        "rightside_used": False, "armed": False, "reduced": False,
+        "exited": False, "observation_entered": False, "exit_streak": 0,
+        "cycle_buys": [], "cycle_sold_fen": 0,
+        "last_weekly_week": None, "phase": "waiting",
+    }
+    empty = pd.DataFrame(columns=["date", "action", "fen", "price", "note"])
+    sub = hist[hist["date"] >= cycle_start_date].sort_values("date")
+    for d in sub["date"].tolist():
+        eng = Engine(config, state, empty, hist)
+        eng.run_daily(str(d))
+        state = eng.state
+        if state.get("exited"):
+            break
+    return state
 
 
 # ─────────────────────────────────────────────
@@ -373,8 +437,8 @@ def calc_warnings(hist: pd.DataFrame, today_str: str, state: dict,
     ma120  = float(row["ma120"])     if not pd.isna(row["ma120"])     else None
 
     band = config.get("warn_band_pp", 2) / 100.0
-    ls   = recalc_from_ledger(ledger, config.get("total_fen", 150),
-                              state.get("cycle_start_date"))
+    # 减仓/止盈类预警基于【策略理论账本】，与信号时机口径一致
+    ls   = theoretical_position(state, config.get("total_fen", 150))
     fp   = (close / ls["weighted_avg"] - 1) if ls["weighted_avg"] and close else None
 
     if pb_pct is not None:
