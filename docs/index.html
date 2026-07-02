@@ -503,6 +503,22 @@
     border-radius:8px; padding:10px; max-height:120px;
     overflow-y:auto; white-space:pre; margin-top:8px;
   }
+  /* ── 数据滞后提示横幅 ── */
+  .stale-banner {
+    background:rgba(224,134,0,.10); border-bottom:2px solid var(--orange);
+    padding:11px 20px; font-size:13px; font-weight:500; color:var(--text);
+    display:flex; align-items:center; gap:10px;
+  }
+  .stale-spinner {
+    display:inline-block; width:13px; height:13px; flex-shrink:0;
+    border:2px solid var(--orange); border-top-color:transparent;
+    border-radius:50%; animation:_spin .8s linear infinite;
+  }
+  @keyframes _spin { to { transform:rotate(360deg); } }
+  .stale-dismiss {
+    margin-left:auto; background:none; border:none; cursor:pointer;
+    color:var(--text3); font-size:16px; line-height:1; padding:2px 6px;
+  }
 </style>
 </head>
 <body>
@@ -522,6 +538,13 @@
     <span class="pending-badge" id="pending-badge" style="display:none"></span>
   </div>
 </header>
+
+<!-- 数据落后提示横幅（JS 动态控制显示） -->
+<div id="stale-banner" class="stale-banner" style="display:none">
+  <span id="stale-spinner" class="stale-spinner" style="display:none"></span>
+  <span id="stale-msg"></span>
+  <button class="stale-dismiss" onclick="this.closest('#stale-banner').style.display='none'" title="关闭">✕</button>
+</div>
 
 <div class="container">
 
@@ -816,10 +839,8 @@
   </div><!-- /tab-content -->
 </div><!-- /ledger-panel -->
 
-<!-- ECharts CDN（staticfile 国内镜像） -->
-<script src="https://cdn.staticfile.org/echarts/5.5.0/echarts.min.js"
-        onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js'">
-</script>
+<!-- ECharts 本地（避免 CDN 拖慢加载，echarts.min.js 与 index.html 同目录）-->
+<script src="echarts.min.js"></script>
 <script>
 // ═══════════════════════════════════════════════════════════
 // 全局配色
@@ -1152,8 +1173,8 @@ function renderDataFreshness(d) {
   const d300   = daysDiff(last300);
   const d500   = daysDiff(last500);
 
-  // ── 全部新鲜：单行绿灯 ──
-  if (Math.max(dClose, d300, d500) <= 1) {
+  // ── 全部新鲜：单行绿灯（必须是今日数据，昨日数据不算新鲜）──
+  if (Math.max(dClose, d300, d500) <= 0) {
     // 取三者中最旧的日期作为「更新至」日期（最保守）
     const oldest = [lastClose, last300, last500].filter(Boolean).sort()[0];
     const [y, m, dd] = oldest.split('-');
@@ -1166,7 +1187,7 @@ function renderDataFreshness(d) {
   // ── 有数据滞后：展开三行明细 ──
   function freshnessChip(dateStr, diff) {
     if (!dateStr) return `<span style="color:var(--text3)">无数据</span>`;
-    if (diff <= 1) {
+    if (diff <= 0) {
       return `<span style="color:var(--green);font-size:9px">●</span> <span style="color:var(--text3)">${dateStr}</span>`;
     } else if (diff <= 3) {
       return `<span style="color:var(--orange);font-size:9px">●</span> <span style="color:var(--text3)">${dateStr}・${diff}天前</span>`;
@@ -1182,6 +1203,95 @@ function renderDataFreshness(d) {
       <span style="color:var(--text3);white-space:nowrap">温度（300）</span><span>${freshnessChip(last300, d300)}</span>
       <span style="color:var(--text3);white-space:nowrap">温度（500）</span><span>${freshnessChip(last500, d500)}</span>
     </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 数据落后横幅 & 自动追新（工作日晚 21:00 后每 30 秒重试，最多 5 分钟）
+// ═══════════════════════════════════════════════════════════
+let _retryTimer = null;
+let _retryCount = 0;
+
+function _lastCloseDate(d) {
+  if (!d.dates || !d.close) return null;
+  for (let i = d.dates.length - 1; i >= 0; i--) {
+    if (d.close[i] != null) return d.dates[i];
+  }
+  return null;
+}
+
+function _beijingNow() {
+  const opts = { timeZone: 'Asia/Shanghai' };
+  return {
+    dateStr: new Date().toLocaleDateString('sv-SE', opts),
+    hour:    parseInt(new Date().toLocaleString('en-US', { ...opts, hour: 'numeric', hour12: false }), 10),
+    isWeekday: !['Sat','Sun'].includes(new Date().toLocaleDateString('en-US', { ...opts, weekday: 'short' })),
+  };
+}
+
+function checkStaleAndRetry(d) {
+  const { dateStr: todayStr, hour, isWeekday } = _beijingNow();
+  const lastClose = _lastCloseDate(d);
+  const banner  = document.getElementById('stale-banner');
+  const spinner = document.getElementById('stale-spinner');
+  const msgEl   = document.getElementById('stale-msg');
+  if (!banner) return;
+
+  if (!lastClose || lastClose >= todayStr) {
+    // 已是今日数据，确保横幅隐藏
+    banner.style.display = 'none';
+    if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
+    return;
+  }
+
+  // 数据落后——构造日期标签
+  const [y, m, dd] = lastClose.split('-');
+  const dateLabel = `${y}年${+m}月${+dd}日`;
+
+  // 工作日 21:00 后且数据只落后 1 天 → 可能正在部署，启动自动追新
+  const shouldRetry = isWeekday && hour >= 21;
+
+  banner.style.display = 'flex';
+  if (shouldRetry) {
+    spinner.style.display = 'inline-block';
+    msgEl.textContent = `⚠️ 当前显示 ${dateLabel} 数据，正在等待今日更新…`;
+    if (!_retryTimer) { _retryCount = 0; _scheduleRetry(); }
+  } else {
+    spinner.style.display = 'none';
+    msgEl.textContent = `⚠️ 当前显示 ${dateLabel} 数据（${isWeekday ? '今日数据尚未发布' : '非交易日，属正常'}）`;
+  }
+}
+
+function _scheduleRetry() {
+  if (_retryCount >= 10) {
+    // 约 5 分钟仍未到，停止自动重试
+    const msgEl   = document.getElementById('stale-msg');
+    const spinner = document.getElementById('stale-spinner');
+    if (msgEl)   msgEl.textContent = '⚠️ 今日数据尚未就绪，请稍后手动刷新页面';
+    if (spinner) spinner.style.display = 'none';
+    _retryTimer = null;
+    return;
+  }
+  _retryTimer = setTimeout(async () => {
+    _retryTimer = null;
+    _retryCount++;
+    try {
+      const r = await fetch('data.json?_=' + Date.now());
+      if (!r.ok) throw new Error('fetch failed');
+      const newData = await r.json();
+      const todayStr = _beijingNow().dateStr;
+      const newClose = _lastCloseDate(newData);
+      if (newClose && newClose >= todayStr) {
+        // 今日数据到了，提示 1.5 秒后刷新页面
+        const msgEl   = document.getElementById('stale-msg');
+        const spinner = document.getElementById('stale-spinner');
+        if (msgEl)   msgEl.textContent = '✓ 今日最新数据已就绪，正在刷新页面…';
+        if (spinner) spinner.style.display = 'none';
+        setTimeout(() => window.location.reload(), 1500);
+        return;
+      }
+    } catch(e) { /* 网络抖动，继续重试 */ }
+    _scheduleRetry();
+  }, 30000);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2153,6 +2263,7 @@ function showToast(msg) {
     renderGaps(DATA);
     renderWarnings(DATA);
     renderDataFreshness(DATA);
+    checkStaleAndRetry(DATA);
     const c1 = renderChartPrice(DATA);
     const c2 = renderChartNav(DATA);
     const c3 = renderChartVal(DATA);
