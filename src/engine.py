@@ -359,16 +359,18 @@ class Engine:
                 streak = count_exit_streak(self.hist, today_str)
                 self.state["exit_streak"] = streak
                 if streak >= 3:
-                    # 清掉理论账本的全部当前持仓
-                    exit_fen = current_fen
-                    signals.append(dict(
-                        type="exit",
-                        fen=exit_fen,
-                        price=close, pb_pct=pb_pct,
-                        reason=f"已武装 + 收盘连续{streak}日低于MA120且MA120下行，全部止盈",
-                        level="timeSensitive",
-                    ))
-                    self.state["cycle_sold_fen"] = self.state.get("cycle_sold_fen", 0) + exit_fen
+                    # 重新读取持仓（若同日已减仓，current_fen 日初快照已过时）
+                    _pos_now = theoretical_position(self.state, self.total_fen)
+                    exit_fen = _pos_now["current_fen"]
+                    if exit_fen > 0:
+                        signals.append(dict(
+                            type="exit",
+                            fen=exit_fen,
+                            price=close, pb_pct=pb_pct,
+                            reason=f"已武装 + 收盘连续{streak}日低于MA120且MA120下行，全部止盈",
+                            level="timeSensitive",
+                        ))
+                        self.state["cycle_sold_fen"] = self.state.get("cycle_sold_fen", 0) + exit_fen
                     self.state["exited"]    = True
                     self.state["exit_date"] = today_str
                     self.state["phase"]     = "waiting"
