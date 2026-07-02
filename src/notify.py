@@ -32,6 +32,10 @@ class BarkNotifier:
     def __init__(self, bark_key: str):
         self.bark_key = bark_key
         self.enabled = bool(bark_key and bark_key.strip())
+        # 发送结果追踪：供 main.py 判断 Bark 通道本身是否健康
+        self.attempted = 0        # 本次运行尝试发送次数
+        self.failures  = 0        # 其中失败次数
+        self.last_error = ""      # 最近一次失败原因
 
     def _send(self, title: str, body: str, level: str = "active",
               group: str = "创业板择时", url: str = None):
@@ -46,14 +50,25 @@ class BarkNotifier:
         if url:
             params["url"] = url
 
+        self.attempted += 1
         try:
             r = requests.get(endpoint, params=params, timeout=15)
             if r.status_code != 200:
+                self.failures += 1
+                self.last_error = f"HTTP {r.status_code}: {r.text[:120]}"
                 logger.warning(f"Bark 推送失败 {r.status_code}: {r.text[:200]}")
             else:
                 logger.info(f"Bark 推送成功: {title}")
         except Exception as e:
+            self.failures += 1
+            self.last_error = str(e)[:120]
             logger.error(f"Bark 推送异常: {e}")
+
+    def bark_healthy(self):
+        """本次运行 Bark 通道是否正常。None=未尝试发送，无法判断。"""
+        if not self.enabled or self.attempted == 0:
+            return None
+        return self.failures == 0
 
     def send_signal(self, signal: dict, today_str: str,
                     total_bought: int, total_fen: int = 150):
@@ -153,6 +168,31 @@ class BarkNotifier:
             title="🔴 创业板监测系统异常",
             body=error_msg,
             level="timeSensitive",
+        )
+
+    def send_health_alert(self, name: str, detail: str, fix: str,
+                          today_str: str = ""):
+        """
+        组件级健康告警：明确告知【哪个组件】出了【什么问题】、【如何修复】。
+        每个组件每天最多一条（去重在 main.py 侧控制）。
+        """
+        date_suffix = f"（{today_str}）" if today_str else ""
+        body = f"⚠️ 问题：{detail or '组件不可用'}\n\n🛠️ 解决方法：\n{fix}"
+        self._send(
+            title=f"🔴 系统组件异常：{name}{date_suffix}",
+            body=body,
+            level="timeSensitive",
+            group="创业板系统健康",
+        )
+
+    def send_health_recovery(self, name: str, today_str: str = ""):
+        """组件从故障恢复的通知。"""
+        date_suffix = f"（{today_str}）" if today_str else ""
+        self._send(
+            title=f"✅ 系统组件已恢复：{name}{date_suffix}",
+            body="该组件已恢复正常，系统监测继续。",
+            level="active",
+            group="创业板系统健康",
         )
 
     def send_info(self, title: str, body: str):

@@ -206,6 +206,8 @@ def generate_data_json(
         "warnings": warnings,
         "committed_ledger": _export_ledger(ledger),
         "trigger_log":      state.get("trigger_log", []),
+        # 系统健康：组件状态 + 修复方法，供页面显眼横幅展示
+        "health":           state.get("health") or {"components": {}},
     }
 
     docs_dir.mkdir(parents=True, exist_ok=True)

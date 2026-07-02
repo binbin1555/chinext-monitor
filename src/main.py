@@ -32,6 +32,7 @@ from src.engine   import (Engine, recalc_from_ledger, calc_warnings,
 from src.metrics  import build_nav_series, calc_performance, calc_gaps
 from src.notify   import BarkNotifier
 from src.dashboard import generate_data_json, load_acknowledged_keys, filter_pending_signals
+import src.health as health
 
 logging.basicConfig(
     level=logging.INFO,
@@ -92,19 +93,18 @@ def main():
     if not args.report_only:
         try:
             hist = update_history(config, data_dir)
+            health.mark(state, "lixinger", "ok")
+            _check_qieman_health(state, hist)
         except Exception as e:
             logger.error(f"理杏仁数据拉取失败: {e}")
-            notifier.send_error(
-                f"⛔ 数据获取失败（{today_str}）\n"
-                f"错误: {e}\n"
-                f"策略引擎已暂停，不使用缓存数据。\n"
-                f"请检查 LIXINGER_TOKEN 及网络连通性。"
-            )
-            # 仅用缓存刷新仪表盘展示，不运行引擎
+            health.mark(state, "lixinger", "down", health.classify_fetch_error(e))
+            _flush_health(state, notifier, args, today_str)   # 明确告知哪出问题+怎么修
+            # 仅用缓存刷新仪表盘展示（含健康横幅），不运行引擎
             csv_path = data_dir / "history.csv"
             if csv_path.exists():
                 hist_cache = pd.read_csv(csv_path, dtype={"date": str})
                 _update_dashboard(hist_cache, state, ledger, config, docs_dir)
+            save_state(state)         # 持久化健康状态
             return  # 严禁继续运行策略引擎
     else:
         csv_path = data_dir / "history.csv"
@@ -130,8 +130,10 @@ def main():
             )
             state["last_stale_alert"] = today_str
             save_state(state)
-        # 仍然更新仪表盘数据（不重复推送）
+        # 非交易日也推送组件健康问题/恢复（去重后每组件每天一条），并刷新仪表盘
+        _flush_health(state, notifier, args, today_str)
         _update_dashboard(hist, state, ledger, config, docs_dir)
+        save_state(state)
         return
 
     if args.fetch_only:
@@ -240,6 +242,7 @@ def main():
         signals = engine.run_daily(today_str)
         state   = engine.state
         warnings = calc_warnings(hist, today_str, state, ledger, config)
+        health.mark(state, "engine", "ok")
 
         # Step 4：推送信号（"已买X/150"用策略理论进度，与信号口径一致）
         if not args.no_push:
@@ -289,18 +292,64 @@ def main():
                 today_str, perf, state, ls, today_row, warnings
             )
 
-        # Step 8：保存状态
+        # Step 8：评估 Bark 通道健康（基于本次信号/日报发送结果）+ 推送健康告警
+        if not args.no_push:
+            bh = notifier.bark_healthy()
+            if bh is True:
+                health.mark(state, "bark", "ok")
+            elif bh is False:
+                health.mark(state, "bark", "down",
+                            f"推送失败 {notifier.failures}/{notifier.attempted} 次：{notifier.last_error}")
+        _flush_health(state, notifier, args, today_str)
+
+        # 保存状态
         state["last_successful_run"] = today_str
         save_state(state)
         logger.info(f"state.json 已更新，signals={[s['type'] for s in signals]}")
 
     except Exception as e:
         logger.error(f"引擎/日报运行失败: {e}", exc_info=True)
-        notifier.send_error(
-            f"🔴 引擎运行异常（{today_str}）\n错误: {e}\n"
-            f"策略状态未更新，请检查 Actions 日志。"
-        )
+        health.mark(state, "engine", "down", f"运行异常：{str(e)[:120]}")
+        _flush_health(state, notifier, args, today_str)
+        # 仅把健康状态持久化到磁盘 state（重新读盘，避免写入引擎异常前的半更新状态）
+        try:
+            clean = load_state()
+            clean["health"] = state.get("health")
+            save_state(clean)
+            _update_dashboard(hist, clean, ledger, config, docs_dir)  # 让健康横幅上网页
+        except Exception as _e2:
+            logger.error(f"健康状态持久化失败: {_e2}")
         raise
+
+
+def _check_qieman_health(state, hist):
+    """且慢温度：最近3个交易日都取不到温度→warn（温度仅展示，不影响买卖信号）。"""
+    if not os.environ.get("QIEMAN_KEY", "").strip():
+        return  # 未配置则不检查
+    try:
+        recent = hist.dropna(subset=["close"]).tail(3)
+        if len(recent) >= 3 and recent["temp_300"].isna().all():
+            health.mark(state, "qieman", "warn", "最近3个交易日均未取到温度数据")
+        else:
+            health.mark(state, "qieman", "ok")
+    except Exception:
+        pass
+
+
+def _flush_health(state, notifier, args, today_str):
+    """推送尚未告警的组件问题（每组件每天最多一条）+ 恢复通知。
+    Bark 自身故障无法用 Bark 报告，仅在网页显示。"""
+    if args.no_push:
+        return
+    for key, c in health.pending_alerts(state):
+        if key == "bark":
+            continue
+        notifier.send_health_alert(c["name"], c.get("detail", ""), c.get("fix", ""), today_str)
+        health.mark_alerted(state, key)
+    for key, c in health.pending_recoveries(state):
+        if key != "bark":
+            notifier.send_health_recovery(c["name"], today_str)
+        health.clear_recovered(state, key)
 
 
 def _update_dashboard(hist, state, ledger, config, docs_dir, warnings=None):

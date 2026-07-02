@@ -525,6 +525,21 @@
     margin-left:auto; background:none; border:none; cursor:pointer;
     color:var(--text3); font-size:16px; line-height:1; padding:2px 6px;
   }
+  /* ── 系统健康横幅（组件故障 / 系统停摆，最高优先级）── */
+  .health-banner {
+    padding:12px 20px 13px; font-size:13px; line-height:1.5; color:var(--text);
+    border-bottom:2px solid #e0392b; background:rgba(224,57,43,.10);
+  }
+  .health-banner.warn { border-bottom-color:var(--orange); background:rgba(224,134,0,.10); }
+  .health-banner h4 { margin:0 0 4px; font-size:14px; font-weight:700; }
+  .health-item { margin:7px 0; }
+  .health-item .hi-name   { font-weight:600; }
+  .health-item .hi-detail { color:var(--text2); }
+  .health-item .hi-fix    { display:block; margin-top:2px; color:var(--text2); font-size:12px; }
+  .health-dismiss {
+    float:right; background:none; border:none; cursor:pointer;
+    color:var(--text3); font-size:16px; line-height:1; padding:2px 6px;
+  }
 </style>
 </head>
 <body>
@@ -544,6 +559,9 @@
     <span class="pending-badge" id="pending-badge" style="display:none"></span>
   </div>
 </header>
+
+<!-- 系统健康横幅（组件故障/系统停摆，JS 动态控制，最高优先级） -->
+<div id="health-banner" class="health-banner" style="display:none"></div>
 
 <!-- 数据落后提示横幅（JS 动态控制显示） -->
 <div id="stale-banner" class="stale-banner" style="display:none">
@@ -1153,6 +1171,66 @@ function renderWarnings(d) {
   document.getElementById('warn-section').style.display = 'block';
   document.getElementById('warn-list').innerHTML = d.warnings
     .map(w => `<div class="warn-item">${w}</div>`).join('');
+}
+
+// ═══════════════════════════════════════════════════════════
+// 系统健康横幅：组件故障（服务端）+ 系统停摆（客户端活性检测）
+// ═══════════════════════════════════════════════════════════
+function renderHealthBanner(d) {
+  const banner = document.getElementById('health-banner');
+  if (!banner) return;
+  const items = [];
+  let worst = 'warn';
+
+  // ① 服务端组件健康：理杏仁 / 且慢 / 引擎 / Bark
+  const comps = (d && d.health && d.health.components) || {};
+  Object.keys(comps).forEach(k => {
+    const c = comps[k];
+    if (c && (c.status === 'down' || c.status === 'warn')) {
+      items.push({ name: c.name || k, detail: c.detail || '', fix: c.fix || '' });
+      if (c.status === 'down') worst = 'down';
+    }
+  });
+
+  // ② 客户端"系统停摆"检测：流水线每天都会刷新 last_update（含非交易日），
+  //    故它是可靠的活性信号；系统完全停摆时无法发 Bark，此横幅是唯一提示。
+  const live = _pipelineLiveness(d);
+  if (live) { items.push(live); worst = 'down'; }
+
+  if (!items.length) { banner.style.display = 'none'; return; }
+
+  banner.className = 'health-banner' + (worst === 'warn' ? ' warn' : '');
+  const icon  = worst === 'down' ? '🔴' : '🟠';
+  const title = worst === 'down' ? '系统异常，需要你处理' : '系统提示';
+  banner.innerHTML =
+    `<button class="health-dismiss" onclick="this.closest('#health-banner').style.display='none'" title="关闭">✕</button>` +
+    `<h4>${icon} ${esc(title)}</h4>` +
+    items.map(it =>
+      `<div class="health-item">` +
+        `<span class="hi-name">${esc(it.name)}</span>` +
+        (it.detail ? ` — <span class="hi-detail">${esc(it.detail)}</span>` : '') +
+        (it.fix ? `<span class="hi-fix">🛠️ ${esc(it.fix)}</span>` : '') +
+      `</div>`
+    ).join('');
+  banner.style.display = 'block';
+}
+
+function _pipelineLiveness(d) {
+  const lu = d && d.last_update;
+  if (!lu) return null;
+  const t = new Date(String(lu).replace(' ', 'T'));
+  if (isNaN(t.getTime())) return null;
+  const hours = (Date.now() - t.getTime()) / 3600000;
+  if (hours >= 40) {   // 流水线本应每天运行；>40h 未刷新→极可能停摆（已含时区容差）
+    const days = Math.max(1, Math.floor(hours / 24));
+    return {
+      name: '定时器 / 运行链路（系统可能已停摆）',
+      detail: `流水线约 ${days} 天未运行（最后更新 ${lu}）`,
+      fix: '① 登录 cron-job.org 确认定时任务在跑；② 到 GitHub 仓库 Actions 页手动 Run workflow 验证；'
+         + '③ 确认 GitHub 账号/仓库/Pages 正常。注意：系统完全停摆时发不出 Bark，此横幅是唯一提示。',
+    };
+  }
+  return null;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2280,6 +2358,7 @@ function showToast(msg) {
     renderWarnings(DATA);
     renderDataFreshness(DATA);
     checkStaleAndRetry(DATA);
+    renderHealthBanner(DATA);
     const c1 = renderChartPrice(DATA);
     const c2 = renderChartNav(DATA);
     const c3 = renderChartVal(DATA);
