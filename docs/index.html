@@ -1056,25 +1056,30 @@ function renderActionBanner(d) {
   const top   = sorted[0];
   const extra = pending.length - 1;
 
-  const LABEL = {
-    T1:'T1 买入信号', T2:'T2 买入信号', T3:'T3 满仓买入',
-    weekly_6:'周定投（6份）', weekly_3:'周定投（3份）',
-    rightside:'右侧补仓', reduce:'减仓 50%', exit:'全部清仓',
+  const CMD = {
+    exit:     '请立即全部清仓',
+    reduce:   '请立即减仓一半',
+    T1:       '请立即买入（T1 建仓）',
+    T2:       '请立即加仓（T2 加仓）',
+    T3:       '请立即满仓（T3 满仓）',
+    weekly_6: '本周请买入（周定投）',
+    weekly_3: '本周请买入（周定投）',
+    rightside:'请立即右侧补仓',
   };
   const isSell = top.type === 'reduce' || top.type === 'exit';
-  const icon   = isSell ? '📉' : '📈';
-  const label  = LABEL[top.type] || top.type;
+  const icon   = isSell ? '🔴' : '📈';
+  const cmd    = CMD[top.type] || top.type;
   const detail = [
-    top.fen   ? `${top.fen} 份`          : '',
+    top.fen   ? `${top.fen} 份`                       : '',
     top.price ? `参考点位 ${(+top.price).toFixed(0)}` : '',
-  ].filter(Boolean).join(' · ');
+  ].filter(Boolean).join('，');
 
-  banner.className    = isSell ? 'ab-sell' : 'ab-buy';
+  banner.className     = isSell ? 'ab-sell' : 'ab-buy';
   banner.style.display = 'flex';
   banner.innerHTML = `
     <div class="ab-icon">${icon}</div>
     <div class="ab-body">
-      <div class="ab-title">⚡ ${esc(label)}${detail ? ' · ' + esc(detail) : ''}</div>
+      <div class="ab-title">${esc(cmd)}${detail ? ' — ' + esc(detail) : ''}</div>
       <div class="ab-detail">${esc(top.reason)}</div>
       ${extra > 0 ? `<div class="ab-detail" style="margin-top:3px">另有 ${extra} 条信号待执行</div>` : ''}
     </div>
@@ -1874,9 +1879,14 @@ function renderPendingSignals() {
     return;
   }
   const typeLabel = {
-    T1:'T1 买入信号', T2:'T2 买入信号', T3:'T3 满仓信号',
-    weekly_6:'周定投（6份）', weekly_3:'周定投（3份）',
-    rightside:'右侧补仓', reduce:'减仓50%', exit:'全部清仓',
+    exit:     '请立即全部清仓',
+    reduce:   '请立即减仓一半',
+    T1:       '请立即买入（T1 建仓）',
+    T2:       '请立即加仓（T2 加仓）',
+    T3:       '请立即满仓（T3 满仓）',
+    weekly_6: '本周请买入（周定投 6份）',
+    weekly_3: '本周请买入（周定投 3份）',
+    rightside:'请立即右侧补仓',
   };
   list.innerHTML = signals.map(s => {
     const isSell = s.type === 'reduce' || s.type === 'exit';
