@@ -66,11 +66,13 @@ python -m http.server 7700 --directory docs
    | Request method | `POST` |
    | Request headers | `Authorization: Bearer 你的GitHub_PAT`<br>`Accept: application/vnd.github+json`<br>`Content-Type: application/json` |
    | Request body | `{"ref":"main"}` |
-   | Schedule | 周一至周五，北京时间 16:30（UTC 08:30） |
+   | Schedule | **每天**，北京时间 16:30（UTC 08:30） |
 
 3. GitHub PAT 需要 **`workflow` 权限**（GitHub → Settings → Developer settings → Personal access tokens → 勾选 `workflow`）
 
-这样每个交易日收盘后，cron-job.org 触发 GitHub Actions，自动拉取数据 → 更新仪表盘。
+这样每个收盘后，cron-job.org 触发 GitHub Actions，自动拉取数据 → 更新仪表盘。
+
+> **为什么设为每天而非"周一至周五"**：仪表盘有系统停摆检测（超过 40 小时未更新即报警）。若只在工作日运行，周五运行后到周日便超出 40 小时，每周末都会误报停摆。设为每天后，周末/节假日流水线仍会运行（检测到非交易日后约 10 秒退出），`last_update` 保持每日刷新，停摆检测不再误报。
 
 ---
 
