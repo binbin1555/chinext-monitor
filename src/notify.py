@@ -137,7 +137,7 @@ class BarkNotifier:
             lines.extend(warnings)
         if state.get("signals_pending"):
             lines.append("─" * 24)
-            lines.append(f"⏳ 有 {len(state['signals_pending'])} 条信号待执行（请回填ledger.csv）")
+            lines.append(f"⏳ 有 {len(state['signals_pending'])} 条操作提醒待处理（查看仪表盘）")
         lines.append(f"仪表盘: {DASHBOARD_URL}")
 
         self._send(
