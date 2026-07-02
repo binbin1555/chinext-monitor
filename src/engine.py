@@ -259,30 +259,30 @@ class Engine:
             if (is_first_trading_day_of_week(today_str, hist_dates[:-1])
                     and self.state.get("last_weekly_week") != week_key):
                 self.state["last_weekly_week"] = week_key
-                if pb_pct < 0.10:
+                if pb_pct < 0.15:
                     qty = min(6, remaining_fen)
                     signals.append(_buy_signal("weekly_6", qty, close, pb_pct,
-                                               "周定投 PB分位<10% 买6份", "timeSensitive"))
+                                               "周定投 PB分位<15% 买6份", "timeSensitive"))
                     remaining_fen -= qty
                 elif pb_pct < 0.20:
                     qty = min(3, remaining_fen)
                     signals.append(_buy_signal("weekly_3", qty, close, pb_pct,
-                                               "周定投 PB分位10~20% 买3份", "active"))
+                                               "周定投 PB分位15~20% 买3份", "active"))
                     remaining_fen -= qty
 
-            # 2. T1：PB分位首次跌破 20%
+            # 2. T1：PB分位首次跌破 20%（金字塔首档，小试）
             if not self.state.get("t1_fired") and pb_pct < 0.20:
-                qty = min(30, remaining_fen)
+                qty = min(10, remaining_fen)
                 signals.append(_buy_signal("T1", qty, close, pb_pct,
-                                           "T1 PB分位首次<20% 一次性买30份", "timeSensitive"))
+                                           "T1 PB分位首次<20% 一次性买10份", "timeSensitive"))
                 self.state["t1_fired"] = True
                 remaining_fen -= qty  # 本日内的 T 档叠加
 
-            # 3. T2：PB分位首次跌破 15%
+            # 3. T2：PB分位首次跌破 15%（金字塔加码，越跌越买）
             if not self.state.get("t2_fired") and pb_pct < 0.15:
-                qty = min(20, remaining_fen)
+                qty = min(30, remaining_fen)
                 signals.append(_buy_signal("T2", qty, close, pb_pct,
-                                           "T2 PB分位首次<15% 一次性买20份", "timeSensitive"))
+                                           "T2 PB分位首次<15% 一次性买30份", "timeSensitive"))
                 self.state["t2_fired"] = True
                 remaining_fen -= qty
 
