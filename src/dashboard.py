@@ -99,28 +99,26 @@ def generate_data_json(
     else:
         nav_port = nav_bh = nav_bm = [None] * len(dates)
 
-    # ── 买卖标记（来自 ledger） ──
+    # ── 买卖标记（来自【策略理论账本】cycle_buys/cycle_sells，按规则自动生成，
+    #    与用户是否手动记账无关）──
+    from src.metrics import build_theoretical_ledger, calc_asset_totals
     buy_signals    = []
     reduce_signals = []
     exit_signals   = []
-    if ledger is not None and len(ledger) > 0:
-        for _, row in ledger.iterrows():
-            d = str(row["date"])
-            if d not in dates:
-                continue
-            close_at = view.loc[view["date"] == d, "close"].values
-            price    = float(close_at[0]) if len(close_at) else float(row["price"])
-            action   = str(row["action"]).lower()
-            if action == "buy":
-                buy_signals.append({
-                    "date": d, "value": price,
-                    "fen": int(row["fen"]),
-                    "note": str(row.get("note", "")).replace('"', ""),
-                })
-            elif action == "reduce":
-                reduce_signals.append({"date": d, "value": price})
-            elif action == "exit":
-                exit_signals.append({"date": d, "value": price})
+    _events = build_theoretical_ledger(state)
+    for _, row in _events.iterrows():
+        d = str(row["date"])
+        if d not in dates:
+            continue
+        close_at = view.loc[view["date"] == d, "close"].values
+        price    = float(close_at[0]) if len(close_at) else float(row["price"])
+        action   = str(row["action"]).lower()
+        if action == "buy":
+            buy_signals.append({"date": d, "value": price, "fen": int(row["fen"]), "note": ""})
+        elif action == "reduce":
+            reduce_signals.append({"date": d, "value": price})
+        elif action == "exit":
+            exit_signals.append({"date": d, "value": price})
 
     # ── 当前状态摘要 ──
     # th = 策略理论账本（驱动信号/缺口）；ls = 用户实盘账本（仅显示实际盈亏，不参与信号）
@@ -141,6 +139,11 @@ def generate_data_json(
     }.get(state.get("phase", ""), state.get("phase", ""))
 
     next_action = _next_action_hint(state, th, today_row, config)
+
+    # 总资产口径（总资产 = 持仓市值 + 已止盈落袋现金）——按【策略理论账本】计算，
+    # 与用户是否手动记账无关，确保减仓后总资产不因"少显示落袋钱"而虚减。
+    totals      = calc_asset_totals(hist, _events, config)
+    completed_n = len(state.get("completed_cycles", []) or [])
 
     # 过滤待执行：已确认的移除、买入类超期移除、卖出类永不过期（跨设备生效，无需 PAT）
     ack_keys   = load_acknowledged_keys(docs_dir.parent)
@@ -181,7 +184,16 @@ def generate_data_json(
             "weighted_avg":       round(th["weighted_avg"], 2) if th.get("weighted_avg") else None,
             "current_close":      cur_close,
             "float_profit":       float_profit,
-            # 用户实盘（仅供显示，不参与任何信号判断）
+            # 总资产口径（含已止盈落袋现金）——全部按规则理论账本计算
+            "total_assets":       round(totals["total_assets"]),
+            "banked_cash":        round(totals["cash"]),
+            "position_value":     round(totals["position_value"]),
+            "total_pnl":          round(totals["total_pnl"]),
+            "total_return":       round(totals["total_return"], 4),
+            "has_reduced":        bool(th.get("has_reduced")),
+            "has_exited":         bool(th.get("has_exited")),
+            "completed_cycles":   completed_n,
+            # 用户实盘（仅供小字对照，不参与任何信号判断，也不影响上面任何数字）
             "actual_current_fen":  ls.get("current_fen", 0),
             "actual_total_bought": ls.get("total_bought", 0),
             "actual_weighted_avg": round(ls["weighted_avg"], 2) if ls.get("weighted_avg") else None,

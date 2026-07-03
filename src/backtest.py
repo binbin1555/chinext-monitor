@@ -74,7 +74,7 @@ def run_backtest(hist: pd.DataFrame, config: dict,
         "rightside_used": False,
         "armed": False, "reduced": False, "reduce_armed": False, "exited": False,
         "observation_entered": False, "exit_streak": 0,
-        "cycle_buys": [], "cycle_sold_fen": 0,
+        "cycle_buys": [], "cycle_sold_fen": 0, "cycle_sells": [],
         "signals_pending": [], "phase": "waiting",
     }
 
@@ -142,7 +142,7 @@ def run_backtest(hist: pd.DataFrame, config: dict,
                     "rightside_used": False,
                     "armed": False, "reduced": False, "reduce_armed": False, "exited": False,
                     "observation_entered": False, "exit_streak": 0,
-                    "cycle_buys": [], "cycle_sold_fen": 0,
+                    "cycle_buys": [], "cycle_sold_fen": 0, "cycle_sells": [],
                     "signals_pending": [], "phase": "waiting",
                 }
 

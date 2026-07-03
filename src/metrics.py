@@ -98,6 +98,72 @@ def build_nav_series(hist: pd.DataFrame, ledger: pd.DataFrame,
     return result
 
 
+def build_theoretical_ledger(state: dict) -> pd.DataFrame:
+    """
+    从【策略理论账本】(cycle_buys / cycle_sells) 构造买卖流水，供净值/总资产按
+    规则计算——与用户是否手动记账无关。列：date, action, fen, price。
+    """
+    rows = []
+    for b in (state.get("cycle_buys") or []):
+        rows.append({"date": str(b.get("date")), "action": "buy",
+                     "fen": int(b.get("fen", 0)), "price": float(b.get("price", 0) or 0)})
+    for s in (state.get("cycle_sells") or []):
+        rows.append({"date": str(s.get("date")), "action": s.get("action", "reduce"),
+                     "fen": int(s.get("fen", 0)), "price": float(s.get("price", 0) or 0)})
+    if not rows:
+        return pd.DataFrame(columns=["date", "action", "fen", "price"])
+    return pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
+
+
+def calc_asset_totals(hist: pd.DataFrame, events: pd.DataFrame, config: dict) -> dict:
+    """
+    按规则账本回放到最新交易日，返回总资产口径的金额（含已止盈落袋的现金）：
+      total_assets   总资产 = 货基现金 + 持仓市值
+      cash           落袋/未投现金（在货基计息）
+      position_value 当前持仓市值
+      total_pnl      总盈亏 = 总资产 − 本金
+      total_return   总收益率
+    口径与 build_nav_series 完全一致（每份=initial_cap/total_fen，归一到 initial_cap）。
+    """
+    initial_cap = float(config.get("initial_capital", 2_000_000))
+    total_fen   = int(config.get("total_fen", 150))
+    cash_rate   = float(config.get("cash_rate_annual", 0.02))
+    start_date  = config.get("start_date", "2023-01-01")
+    per_fen     = initial_cap / total_fen
+
+    sub = hist[hist["date"] >= start_date].reset_index(drop=True)
+    if len(sub) == 0:
+        return dict(total_assets=initial_cap, cash=initial_cap, position_value=0.0,
+                    total_pnl=0.0, total_return=0.0)
+
+    lbd = {}
+    if events is not None and len(events) > 0:
+        for _, r in events.iterrows():
+            lbd.setdefault(str(r["date"]), []).append(r)
+
+    cash = initial_cap; holdings = 0.0; held = 0; last_close = None
+    for i in range(len(sub)):
+        c = float(sub["close"].iloc[i])
+        if np.isnan(c):
+            continue
+        last_close = c
+        for r in lbd.get(str(sub["date"].iloc[i]), []):
+            a = str(r["action"]).lower(); fen = int(r["fen"]); pr = float(r["price"])
+            amt = fen * per_fen
+            if a == "buy":
+                cash -= amt; holdings += (amt / pr if pr else 0); held += fen
+            elif a in ("reduce", "exit"):
+                ss = holdings * (min(fen, held) / held) if held > 0 else 0.0
+                cash += ss * pr; holdings -= ss; held = max(0, held - fen)
+        cash *= (1 + ((1 + cash_rate) ** (1 / 252) - 1))
+
+    position_value = holdings * (last_close or 0.0)
+    total_assets   = cash + position_value
+    return dict(total_assets=total_assets, cash=cash, position_value=position_value,
+                total_pnl=total_assets - initial_cap,
+                total_return=total_assets / initial_cap - 1)
+
+
 def calc_performance(nav_series: pd.Series, start_date: str,
                      risk_free_rate: float = 0.02) -> dict:
     """

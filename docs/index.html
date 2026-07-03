@@ -142,6 +142,20 @@
   .daily-yuan { font-size:36px; font-weight:700; letter-spacing:-1px; line-height:1; color:var(--text); }
   .daily-pct { font-size:17px; font-weight:600; }
   .profit-yuan { font-size:13px; font-weight:600; margin-top:5px; line-height:1.5; overflow-wrap:break-word; }
+  /* ── 总资产大卡（触发提示下方，含已止盈落袋现金）── */
+  .total-assets-card {
+    background:var(--surface);
+    -webkit-backdrop-filter:blur(20px) saturate(180%);
+    backdrop-filter:blur(20px) saturate(180%);
+    border:1px solid var(--border); border-radius:18px;
+    box-shadow:var(--shadow-sm); padding:16px 20px; margin-bottom:12px;
+  }
+  .ta-label { font-size:12px; font-weight:500; color:var(--text2); letter-spacing:.3px; margin-bottom:8px; }
+  .ta-row { display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
+  .ta-value { font-size:32px; font-weight:700; letter-spacing:-.8px; line-height:1; color:var(--text); }
+  .ta-pnl { font-size:16px; font-weight:600; }
+  .ta-ret { font-size:15px; font-weight:600; }
+  .ta-sub { font-size:12px; color:var(--text3); margin-top:8px; }
   /* ── 温度计卡片 ── */
   .temp-row  { display:flex; gap:20px; margin-top:8px; align-items:flex-end; }
   .temp-item { display:flex; flex-direction:column; gap:4px; }
@@ -572,8 +586,19 @@
 
 <div class="container">
 
-  <!-- ═══ 行动横幅（有待执行信号时显示）═══ -->
+  <!-- ═══ 行动横幅（触发提示，有待执行信号时显示）═══ -->
   <div id="action-banner" style="display:none"></div>
+
+  <!-- ═══ 总资产（触发提示下方；含已止盈落袋现金，全部按规则计算）═══ -->
+  <div class="total-assets-card skeleton" id="total-assets-card">
+    <div class="ta-label">总资产 · 持仓 + 货基现金</div>
+    <div class="ta-row">
+      <span class="ta-value" id="kpi-total-assets">--</span>
+      <span class="ta-pnl" id="kpi-total-pnl"></span>
+      <span class="ta-ret" id="kpi-total-return"></span>
+    </div>
+    <div class="ta-sub" id="kpi-total-sub"></div>
+  </div>
 
   <!-- ═══ Tier 1：下一次操作触发器（Hero） ═══ -->
   <div class="hero-card" id="gap-hero">
@@ -604,7 +629,7 @@
           </div>
         </div>
         <div class="daily-right">
-          <div class="stat-label">当前浮盈 · 策略</div>
+          <div class="stat-label">持仓浮盈 · 策略</div>
           <div class="stat-value" id="kpi-profit">--</div>
           <div class="profit-yuan" id="kpi-profit-yuan"></div>
         </div>
@@ -637,12 +662,12 @@
     <div class="mini-card skeleton">
       <div class="mini-label">CAGR 年化</div>
       <div class="mini-value" id="kpi-cagr">--</div>
-      <div class="mini-sub">策略启动以来</div>
+      <div class="mini-sub">策略启动以来 · 含落袋现金</div>
     </div>
     <div class="mini-card skeleton">
       <div class="mini-label">最大回撤</div>
       <div class="mini-value" id="kpi-dd">--</div>
-      <div class="mini-sub">峰值至谷底</div>
+      <div class="mini-sub">峰值至谷底 · 含落袋现金</div>
     </div>
     <div class="mini-card skeleton">
       <div class="mini-label">持仓份数</div>
@@ -945,6 +970,24 @@ function fmtYuan(v) {
   return sign + '¥ ' + abs.toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
 }
 
+function fmtWan(v) {
+  if (v == null) return '--';
+  return (v / 10000).toLocaleString('en-US', { maximumFractionDigits: 0 }) + '万';
+}
+
+// 总资产大卡底部：按当前阶段给出状态描述（份数/减仓/清仓皆自动判断）
+function phaseText(s) {
+  const fen = s.current_fen || 0, total = s.total_fen || 150;
+  if (fen <= 0) {
+    return (s.has_exited || (s.completed_cycles || 0) > 0)
+      ? '已全部止盈，等待下次熊市'
+      : '空仓，等待下次熊市建仓';
+  }
+  if (fen >= total) return '目前满仓创业板';
+  if (s.has_reduced) return '已止盈50%，目前半仓创业板';
+  return '建仓中，目前 ' + fen + '/' + total + ' 份';
+}
+
 function renderKPIs(d) {
   const s = d.status, m = d.metrics;
 
@@ -957,32 +1000,57 @@ function renderKPIs(d) {
   const holdingValue  = s.weighted_avg && s.current_close
     ? costBasis * (s.current_close / s.weighted_avg) : null;
 
-  // 当日收益
+  // 总资产大卡（含已止盈落袋现金，全部按规则理论账本）
+  const taEl = document.getElementById('kpi-total-assets');
+  const tpEl = document.getElementById('kpi-total-pnl');
+  const trEl = document.getElementById('kpi-total-return');
+  const tsEl = document.getElementById('kpi-total-sub');
+  if (taEl && s.total_assets != null) {
+    taEl.textContent = '¥' + fmtWan(s.total_assets);
+    if (s.total_pnl != null) {
+      tpEl.textContent = '总盈亏 ' + (s.total_pnl >= 0 ? '+' : '−') + '¥' + fmtWan(Math.abs(s.total_pnl));
+      setColor(tpEl, s.total_pnl);
+    }
+    if (s.total_return != null) {
+      trEl.textContent = '总收益率 ' + (s.total_return >= 0 ? '+' : '') + pct(s.total_return);
+      setColor(trEl, s.total_return);
+    }
+    tsEl.textContent = phaseText(s);
+  }
+
+  // 当日收益：金额=持仓当日涨跌（格式不变）；百分比=当日金额÷总资产（账户口径）
   const closes = d.close || [];
   let todayClose = null, prevClose = null;
   for (let i = closes.length - 1; i >= 0; i--) { if (closes[i] != null) { todayClose = closes[i]; break; } }
   for (let i = closes.length - 2; i >= 0; i--) { if (closes[i] != null) { prevClose  = closes[i]; break; } }
   const dailyPct  = (todayClose && prevClose) ? (todayClose - prevClose) / prevClose : null;
-  const dailyYuan = (dailyPct != null && holdingValue != null) ? dailyPct * holdingValue : null;
+  const posVal    = (s.position_value != null) ? s.position_value : holdingValue;
+  const dailyYuan = (dailyPct != null && posVal != null) ? dailyPct * posVal : null;
+  const totalBase = s.total_assets || posVal;
+  const dailyPctAcct = (dailyYuan != null && totalBase) ? dailyYuan / totalBase : null;
   const dyEl  = document.getElementById('kpi-daily-yuan');
   const dpEl  = document.getElementById('kpi-daily-pct');
   dyEl.textContent = fmtYuan(dailyYuan);
   setColor(dyEl, dailyYuan);
-  dpEl.textContent = dailyPct != null ? (dailyPct >= 0 ? '+' : '') + pct(dailyPct) : '--';
-  setColor(dpEl, dailyPct);
+  dpEl.textContent = dailyPctAcct != null ? (dailyPctAcct >= 0 ? '+' : '') + pct(dailyPctAcct) : '--';
+  setColor(dpEl, dailyPctAcct);
 
-  // 浮盈：主数字=策略理论浮盈（驱动减仓/止盈信号，不受你手动记账影响）
+  // 持仓浮盈：主数字=策略理论浮盈（仅剩余持仓的未实现，驱动信号，不受手动记账影响）
   const fp = s.float_profit;
   const pfEl = document.getElementById('kpi-profit');
   pfEl.textContent = pct(fp);
   setColor(pfEl, fp);
-  // 副行=你的实盘浮盈与金额（来自 ledger，仅供参考，不影响任何信号）
-  const afp  = (s.actual_float_profit != null) ? s.actual_float_profit : fp;
-  const afen = (s.actual_current_fen  != null) ? s.actual_current_fen  : (s.current_fen || 0);
-  const fpYuan = (afp != null) ? afen * price_per_fen * afp : null;
+  // 副行：已止盈落袋（减/清仓后）+ 你的实盘浮盈（仅小字对照，不影响上面任何数字与信号）
   const pyEl = document.getElementById('kpi-profit-yuan');
-  pyEl.textContent = (afp != null ? `实盘 ${pct(afp)}　` : '') + (fpYuan != null ? fmtYuan(fpYuan) : '');
-  setColor(pyEl, fpYuan);
+  const pyParts = [];
+  if ((s.has_reduced || s.has_exited) && s.banked_cash != null) {
+    pyParts.push('已止盈落袋 ¥' + fmtWan(s.banked_cash));
+  }
+  if (s.actual_float_profit != null) {
+    pyParts.push('实盘 ' + pct(s.actual_float_profit) + '（仅参考）');
+  }
+  pyEl.textContent = pyParts.join('　·　');
+  pyEl.style.color = 'var(--text3)';
 
   // CAGR：正=红，负=绿
   const cagrEl = document.getElementById('kpi-cagr');

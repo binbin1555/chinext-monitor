@@ -357,6 +357,9 @@ class Engine:
                     ))
                     self.state["reduced"] = True
                     self.state["cycle_sold_fen"] = self.state.get("cycle_sold_fen", 0) + qty
+                    # 带价格记入理论账本，供"总资产/落袋现金/净值"按规则计算（不依赖用户记账）
+                    self.state.setdefault("cycle_sells", []).append(
+                        {"date": today_str, "fen": qty, "price": close, "action": "reduce"})
 
             # 全部止盈（武装后 MA120 连续 3 日掉头）
             if self.state.get("armed") and ma120 is not None:
@@ -375,6 +378,8 @@ class Engine:
                             level="timeSensitive",
                         ))
                         self.state["cycle_sold_fen"] = self.state.get("cycle_sold_fen", 0) + exit_fen
+                        self.state.setdefault("cycle_sells", []).append(
+                            {"date": today_str, "fen": exit_fen, "price": close, "action": "exit"})
                     self.state["exited"]    = True
                     self.state["exit_date"] = today_str
                     self.state["phase"]     = "waiting"
@@ -410,7 +415,7 @@ def bootstrap_cycle_from_history(hist: pd.DataFrame, config: dict,
         "rightside_used": False, "armed": False, "reduced": False,
         "reduce_armed": False,
         "exited": False, "observation_entered": False, "exit_streak": 0,
-        "cycle_buys": [], "cycle_sold_fen": 0,
+        "cycle_buys": [], "cycle_sold_fen": 0, "cycle_sells": [],
         "last_weekly_week": None, "phase": "waiting",
     }
     empty = pd.DataFrame(columns=["date", "action", "fen", "price", "note"])

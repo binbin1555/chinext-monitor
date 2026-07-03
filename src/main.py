@@ -29,7 +29,7 @@ import yaml
 from src.fetch    import update_history
 from src.engine   import (Engine, recalc_from_ledger, calc_warnings,
                            theoretical_position, bootstrap_cycle_from_history)
-from src.metrics  import build_nav_series, calc_performance, calc_gaps
+from src.metrics  import build_nav_series, calc_performance, calc_gaps, build_theoretical_ledger
 from src.notify   import BarkNotifier
 from src.dashboard import generate_data_json, load_acknowledged_keys, filter_pending_signals
 import src.health as health
@@ -188,7 +188,7 @@ def main():
             "rightside_used": False, "armed": False, "reduced": False,
             "reduce_armed": False,
             "exited": False, "observation_entered": False, "exit_streak": 0,
-            "cycle_buys": [], "cycle_sold_fen": 0,
+            "cycle_buys": [], "cycle_sold_fen": 0, "cycle_sells": [],
             "last_weekly_week": None, "phase": "waiting",
         })
         logger.info(f"上一轮(第{old_cycle}轮)已清仓，开启第{state['cycle_id']}轮，"
@@ -278,10 +278,10 @@ def main():
         # Step 6：更新仪表盘数据
         _update_dashboard(hist, state, ledger, config, docs_dir, warnings=warnings)
 
-        # Step 7：发日报（持仓/浮盈用策略理论账本，与信号口径一致）
+        # Step 7：发日报（持仓/浮盈/净值均用策略理论账本，与信号口径一致）
         if not args.no_push:
             ls     = theoretical_position(state, total_fen)
-            nav_df = build_nav_series(hist, ledger, config, state)
+            nav_df = build_nav_series(hist, build_theoretical_ledger(state), config, state)
             nav_arr = nav_df["nav_portfolio"].tolist() if len(nav_df) > 0 else [1.0]
             perf  = calc_performance(
                 nav_arr, config.get("start_date", "2023-01-01"),
@@ -356,7 +356,9 @@ def _flush_health(state, notifier, args, today_str):
 def _update_dashboard(hist, state, ledger, config, docs_dir, warnings=None):
     """更新 docs/data.json（仪表盘数据层）。"""
     try:
-        nav_df = build_nav_series(hist, ledger, config, state)
+        # 净值按【策略理论账本】计算（不读用户 ledger），与提示触发同源、不受手动记账影响
+        _events = build_theoretical_ledger(state)
+        nav_df = build_nav_series(hist, _events, config, state)
         nav_arr = nav_df["nav_portfolio"].tolist() if len(nav_df) > 0 else [1.0]
         perf   = calc_performance(
             nav_arr,
