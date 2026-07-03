@@ -31,13 +31,15 @@ logger = logging.getLogger(__name__)
 # 注：2026-07 策略修订为金字塔加仓（T1<20%→10份 / T2<15%→30份 / T3满仓；
 # 周定投 6份档阈值 <10%→<15%）。触发【日期/价格】由阈值决定，与份数无关，故不变；
 # 仅加权均价随份数分布下移（第1轮 1363→1349，第2轮 2234→2231）。
+# 又注：2026-07 减仓阈值由 +100% 下调至 +80%（理由见操作手册4.2）——第1轮减仓
+# 由 2020-07-09@2758 前移至 2020-06-30@2438；止盈/T档均不受影响。
 GOLD = {
     1: {
         "T1": ("2018-06-19", 1547),
         "T2": ("2018-08-17", 1434),
         "T3": ("2018-10-16", 1217),
         "avg_approx": 1349,
-        "reduce": ("2020-07-09", 2758),
+        "reduce": ("2020-06-30", 2438),
         "exit":   ("2022-01-11", 3056),
     },
     2: {
@@ -70,7 +72,7 @@ def run_backtest(hist: pd.DataFrame, config: dict,
         "fen_size": initial_capital / total_fen,
         "t1_fired": False, "t2_fired": False, "t3_fired": False,
         "rightside_used": False,
-        "armed": False, "reduced": False, "exited": False,
+        "armed": False, "reduced": False, "reduce_armed": False, "exited": False,
         "observation_entered": False, "exit_streak": 0,
         "cycle_buys": [], "cycle_sold_fen": 0,
         "signals_pending": [], "phase": "waiting",
@@ -138,7 +140,7 @@ def run_backtest(hist: pd.DataFrame, config: dict,
                     "fen_size": initial_capital / total_fen,
                     "t1_fired": False, "t2_fired": False, "t3_fired": False,
                     "rightside_used": False,
-                    "armed": False, "reduced": False, "exited": False,
+                    "armed": False, "reduced": False, "reduce_armed": False, "exited": False,
                     "observation_entered": False, "exit_streak": 0,
                     "cycle_buys": [], "cycle_sold_fen": 0,
                     "signals_pending": [], "phase": "waiting",

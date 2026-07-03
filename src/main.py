@@ -186,6 +186,7 @@ def main():
             "cycle_start_date": new_start,
             "t1_fired": False, "t2_fired": False, "t3_fired": False,
             "rightside_used": False, "armed": False, "reduced": False,
+            "reduce_armed": False,
             "exited": False, "observation_entered": False, "exit_streak": 0,
             "cycle_buys": [], "cycle_sold_fen": 0,
             "last_weekly_week": None, "phase": "waiting",

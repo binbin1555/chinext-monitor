@@ -341,14 +341,18 @@ class Engine:
                         level="timeSensitive",
                     ))
 
-            # 减仓 50%（一次性）
-            if not self.state.get("reduced") and float_profit >= 1.00:
+            # 减仓 50%（一次性）——阈值 +80%（2026-07 由 +100% 下调；理由见操作手册4.2）。
+            # 采用"曾达"语义（与武装同款）：本轮浮盈一旦触及 80% 即永久满足条件，
+            # 防止行情快速跌穿 80% 时漏掉减仓——那正是高位回撤最该被保护的情形。
+            if float_profit >= 0.80:
+                self.state["reduce_armed"] = True
+            if not self.state.get("reduced") and self.state.get("reduce_armed"):
                 qty = current_fen // 2
                 if qty > 0:
                     signals.append(dict(
                         type="reduce",
                         fen=qty, price=close, pb_pct=pb_pct,
-                        reason=f"浮盈{float_profit:.1%}≥100%，卖出一半({qty}份)",
+                        reason=f"浮盈曾达80%（当前{float_profit:.1%}），卖出一半({qty}份)",
                         level="timeSensitive",
                     ))
                     self.state["reduced"] = True
@@ -404,6 +408,7 @@ def bootstrap_cycle_from_history(hist: pd.DataFrame, config: dict,
         "cycle_id": 1, "cycle_start_date": cycle_start_date,
         "t1_fired": False, "t2_fired": False, "t3_fired": False,
         "rightside_used": False, "armed": False, "reduced": False,
+        "reduce_armed": False,
         "exited": False, "observation_entered": False, "exit_streak": 0,
         "cycle_buys": [], "cycle_sold_fen": 0,
         "last_weekly_week": None, "phase": "waiting",
@@ -452,8 +457,8 @@ def calc_warnings(hist: pd.DataFrame, today_str: str, state: dict,
             warnings.append(f"⚠️ PB分位{pb_pct:.1%}，距T3触发(<10%)还差{(pb_pct-0.10)*100:.1f}%")
 
     if fp is not None:
-        if not ls["has_reduced"] and 0.95 <= fp < 1.00:
-            warnings.append(f"⚠️ 浮盈{fp:.1%}，距减仓线(100%)还差{(1.00-fp)*100:.1f}%")
+        if not ls["has_reduced"] and 0.75 <= fp < 0.80:
+            warnings.append(f"⚠️ 浮盈{fp:.1%}，距减仓线(80%)还差{(0.80-fp)*100:.1f}%")
 
     if pe_pct is not None and 0.78 <= pe_pct < 0.80:
         warnings.append(f"⚠️ PE分位{pe_pct:.1%}，临近止盈观察期条件（80%）")

@@ -8,6 +8,7 @@
   "rightside_used": false,
   "armed": true,
   "reduced": false,
+  "reduce_armed": true,
   "observation_entered": true,
   "exit_streak": 0,
   "signals_pending": [],

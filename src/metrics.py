@@ -209,26 +209,28 @@ def calc_gaps(hist: pd.DataFrame, today_str: str, state: dict,
 
     # ── 卖出侧 ──
     if ls.get("current_fen", 0) > 0 and fp is not None:
-        # 减仓 50%（浮盈≥100%）—— 口径：点位再涨 X%
+        # 减仓 50%（浮盈≥80%，2026-07 由 100% 下调）—— 口径：点位再涨 X%
+        # "曾达"语义：本轮浮盈一旦触及 80%（reduce_armed）即视为已满足，与引擎一致
+        reduce_qualified = bool(state.get("reduce_armed")) or fp >= 0.80
         if not ls.get("has_reduced"):
-            if fp < 1.00:
-                rise = (1.0 - fp) / (1.0 + fp)
+            if not reduce_qualified:
+                rise = (0.80 - fp) / (1.0 + fp)
                 gaps.append({
                     "name": "减仓 50%",
                     "big": f"+{rise*100:.1f}%",
                     "headline": f"点位再涨 {rise*100:.1f}%，触发减仓 50%",
                     "note": "卖出一半，锁定收益",
-                    "current": f"当前浮盈 {fp*100:.1f}%，目标 100%",
-                    "progress": clamp01(fp / 1.00),
+                    "current": f"当前浮盈 {fp*100:.1f}%，目标 80%",
+                    "progress": clamp01(fp / 0.80),
                     "tone": "up",
                 })
             else:
                 gaps.append({
                     "name": "减仓 50%",
                     "big": "已满足",
-                    "headline": "浮盈已达 100%，可执行减仓 50%（卖出一半锁定收益）",
+                    "headline": "浮盈曾达 80%，请立即减仓 50%（卖出一半锁定收益）",
                     "note": "",
-                    "current": f"当前浮盈 {fp*100:.1f}%",
+                    "current": f"当前浮盈 {fp*100:.1f}%（曾达80%即触发）",
                     "progress": 1.0,
                     "tone": "up",
                 })
