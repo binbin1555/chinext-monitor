@@ -648,6 +648,7 @@
       <div class="mini-label">持仓份数</div>
       <div class="mini-value" id="kpi-fen">--</div>
       <div class="mini-track"><div class="mini-fill" id="kpi-fen-bar" style="width:0%"></div></div>
+      <div class="mini-sub" id="kpi-fen-sub">策略目标</div>
     </div>
   </div>
 
@@ -992,11 +993,22 @@ function renderKPIs(d) {
   const ddEl = document.getElementById('kpi-dd');
   ddEl.textContent = pct(m.max_drawdown);
 
-  // 持仓份数（Tier 3）
+  // 持仓份数（Tier 3）—— 主数字=策略目标(理论账本，驱动信号)
   const fenEl = document.getElementById('kpi-fen');
   fenEl.textContent = `${s.current_fen} / ${s.total_fen}`;
   const barPct = s.total_fen > 0 ? (s.current_fen / s.total_fen * 100).toFixed(1) : 0;
   document.getElementById('kpi-fen-bar').style.width = barPct + '%';
+  // 副行：与实盘一致则标注"= 实盘"；不一致（信号已发、你尚未记账）则提示待对齐
+  const fenSub = document.getElementById('kpi-fen-sub');
+  if (fenSub) {
+    const actualFen = (s.actual_current_fen != null) ? s.actual_current_fen : s.current_fen;
+    if (actualFen === s.current_fen) {
+      fenSub.textContent = '策略目标 = 实盘';
+    } else {
+      const verb = actualFen > s.current_fen ? '待卖出记账' : '待买入记账';
+      fenSub.innerHTML = `策略目标 · 实盘 ${actualFen} 份 <span style="color:var(--orange)">（${verb}）</span>`;
+    }
+  }
 
   // PB 分位：高=贵=市场涨=红，低=便宜=市场跌=绿（A股涨跌色 & 策略买卖一致）
   // <20% 绿（低估买入区）→ 20-60% 黑（中性）→ 60-80% 橙（偏贵）→ ≥80% 红（高估卖出区）
