@@ -78,13 +78,13 @@
     "updated_at": "2026-07-04 13:15 UTC",
     "components": {
       "lixinger": {
-        "status": "down",
-        "detail": "数据拉取失败：理杏仁 基本面接口异常: no data",
+        "status": "ok",
+        "detail": "",
         "name": "理杏仁数据源（PB/PE分位·收盘价）",
         "fix": "① 到 GitHub 仓库 Settings → Secrets and variables → Actions 更新 LIXINGER_TOKEN；② 登录理杏仁确认订阅未到期、API 额度未用尽。这是买卖信号的命根子，修复前引擎拒绝运行。",
         "critical": true,
-        "last_ok": "2026-07-03",
-        "alerted_date": "2026-07-04",
+        "last_ok": "2026-07-04",
+        "alerted_date": "",
         "just_recovered": false
       },
       "qieman": {
