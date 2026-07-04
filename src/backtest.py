@@ -133,6 +133,15 @@ def run_backtest(hist: pd.DataFrame, config: dict,
                     cycle_rows.append(rec); all_rows.append(rec)
                 # 清仓 → 新一轮空账本（实盘中清仓后重设150份）
                 cycle_rows = []
+                # 归档本轮理论账本（与 main.py 轮次重置一致），保证 --reset 写入的
+                # state 携带历史轮次，总资产/净值可跨轮回放
+                done = state.get("completed_cycles", [])
+                done.append({
+                    "cycle_id": state["cycle_id"], "start": None, "end": today,
+                    "avg": None,
+                    "buys":  list(state.get("cycle_buys") or []),
+                    "sells": list(state.get("cycle_sells") or []),
+                })
                 # 重置状态进入下一轮
                 state = {
                     "cycle_id": state["cycle_id"] + 1,
@@ -144,6 +153,7 @@ def run_backtest(hist: pd.DataFrame, config: dict,
                     "observation_entered": False, "exit_streak": 0,
                     "cycle_buys": [], "cycle_sold_fen": 0, "cycle_sells": [],
                     "signals_pending": [], "phase": "waiting",
+                    "completed_cycles": done,
                 }
 
             all_signals.append((today, sig))

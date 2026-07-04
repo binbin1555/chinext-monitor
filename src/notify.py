@@ -110,7 +110,8 @@ class BarkNotifier:
 
     def send_daily_report(self, today_str: str, metrics: dict,
                           state: dict, ledger_state: dict,
-                          row_data: dict, warnings: list):
+                          row_data: dict, warnings: list,
+                          total_fen: int = 150):
         """每日日报：无论有无信号都发送，是系统心跳。"""
         phase_map = {
             "waiting": "空仓等待",
@@ -144,7 +145,7 @@ class BarkNotifier:
             t500_str = f"{t500:.1f}" if t500 is not None else "N/A"
             lines.append(f"温度: 沪深300={t300:.1f}  中证500={t500_str}")
         if fp is not None:
-            lines.append(f"当前浮盈: {fp*100:.1f}%  持仓: {ledger_state.get('current_fen', 0)}/{150}份")
+            lines.append(f"当前浮盈: {fp*100:.1f}%  持仓: {ledger_state.get('current_fen', 0)}/{total_fen}份")
         if metrics.get("cagr") is not None:
             lines.append(f"CAGR: {metrics['cagr']*100:.1f}%  回撤: {metrics.get('max_drawdown', 0)*100:.1f}%")
         if warnings:

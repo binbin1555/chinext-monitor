@@ -178,9 +178,13 @@ def main():
         last_trade = state.get("exit_date") or today_str
         new_start  = (datetime.strptime(last_trade, "%Y-%m-%d")
                       + timedelta(days=1)).strftime("%Y-%m-%d")
+        # 归档本轮理论账本（buys/sells）——总资产/净值/CAGR 跨轮连续的关键：
+        # build_theoretical_ledger 会把归档轮与当前轮拼接回放，落袋利润不因重置消失
         state.setdefault("completed_cycles", []).append(
             {"cycle_id": old_cycle, "start": cyc_start, "end": last_trade,
-             "avg": round(_pos["weighted_avg"], 2) if _pos["weighted_avg"] else None})
+             "avg": round(_pos["weighted_avg"], 2) if _pos["weighted_avg"] else None,
+             "buys":  list(state.get("cycle_buys") or []),
+             "sells": list(state.get("cycle_sells") or [])})
         state.update({
             "cycle_id": old_cycle + 1,
             "cycle_start_date": new_start,
@@ -290,7 +294,8 @@ def main():
             today_row = hist[hist["date"] == today_str].iloc[0].to_dict() if len(
                 hist[hist["date"] == today_str]) > 0 else {}
             notifier.send_daily_report(
-                today_str, perf, state, ls, today_row, warnings
+                today_str, perf, state, ls, today_row, warnings,
+                total_fen=total_fen,
             )
 
         # Step 8：评估 Bark 通道健康（基于本次信号/日报发送结果）+ 推送健康告警

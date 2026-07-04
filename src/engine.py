@@ -347,7 +347,9 @@ class Engine:
             if float_profit >= 0.80:
                 self.state["reduce_armed"] = True
             if not self.state.get("reduced") and self.state.get("reduce_armed"):
-                qty = current_fen // 2
+                # 用含本日买入的最新持仓算"一半"（与 exit 同口径），避免同日
+                # 恰有买入信号时按日初快照少卖（理论上仅右侧补仓可能与减仓同日）
+                qty = theoretical_position(self.state, self.total_fen)["current_fen"] // 2
                 if qty > 0:
                     signals.append(dict(
                         type="reduce",

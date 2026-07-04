@@ -100,19 +100,35 @@ def build_nav_series(hist: pd.DataFrame, ledger: pd.DataFrame,
 
 def build_theoretical_ledger(state: dict) -> pd.DataFrame:
     """
-    从【策略理论账本】(cycle_buys / cycle_sells) 构造买卖流水，供净值/总资产按
-    规则计算——与用户是否手动记账无关。列：date, action, fen, price。
+    从【策略理论账本】构造买卖流水，供净值/总资产按规则计算——与用户是否
+    手动记账无关。列：date, action, fen, price。
+    包含【已归档的历史轮次】(completed_cycles[*].buys/sells) + 当前轮
+    (cycle_buys/cycle_sells)：轮次重置后总资产/净值才能跨轮连续，
+    已止盈落袋的利润不会因开新轮而从账上消失。
     """
     rows = []
-    for b in (state.get("cycle_buys") or []):
+
+    def _add_buy(b):
         rows.append({"date": str(b.get("date")), "action": "buy",
                      "fen": int(b.get("fen", 0)), "price": float(b.get("price", 0) or 0)})
-    for s in (state.get("cycle_sells") or []):
+
+    def _add_sell(s):
         rows.append({"date": str(s.get("date")), "action": s.get("action", "reduce"),
                      "fen": int(s.get("fen", 0)), "price": float(s.get("price", 0) or 0)})
+
+    for cyc in (state.get("completed_cycles") or []):
+        for b in (cyc.get("buys") or []):
+            _add_buy(b)
+        for s in (cyc.get("sells") or []):
+            _add_sell(s)
+    for b in (state.get("cycle_buys") or []):
+        _add_buy(b)
+    for s in (state.get("cycle_sells") or []):
+        _add_sell(s)
+
     if not rows:
         return pd.DataFrame(columns=["date", "action", "fen", "price"])
-    return pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
+    return pd.DataFrame(rows).sort_values("date", kind="stable").reset_index(drop=True)
 
 
 def calc_asset_totals(hist: pd.DataFrame, events: pd.DataFrame, config: dict) -> dict:
@@ -228,6 +244,7 @@ def calc_gaps(hist: pd.DataFrame, today_str: str, state: dict,
     row = row.iloc[0]
 
     pb_pct  = row["pb_pct10y"] if not pd.isna(row["pb_pct10y"]) else None
+    pe_pct  = row["pe_pct10y"] if not pd.isna(row["pe_pct10y"]) else None
     close   = row["close"]     if not pd.isna(row["close"])     else None
     ma120   = row["ma120"]     if not pd.isna(row["ma120"])     else None
     total_fen = config.get("total_fen", 150)
@@ -329,25 +346,51 @@ def calc_gaps(hist: pd.DataFrame, today_str: str, state: dict,
                     "tone": "down",
                 })
 
-        # 进入止盈观察期（未进入）—— PB分位≥80% 且 浮盈≥70%
+        # 进入止盈观察期（未进入）—— 手册4.1三条路径都建模，取最接近触发的一条展示：
+        #   A: 浮盈≥100%（无视估值）  B: PB分位≥80% 且 浮盈≥70%  C: PE分位≥80% 且 浮盈≥80%
         if not state.get("observation_entered"):
-            pb_prog = (pb_pct / 0.80) if pb_pct is not None else 0
-            fp_prog = fp / 0.70
-            if pb_prog <= fp_prog:
-                gap_pp = max(0, (0.80 - (pb_pct or 0)) * 100)
-                big = f"+{gap_pp:.0f}%"
-                headline = f"PB 分位再升 {gap_pp:.0f}%，进入止盈观察期"
-            else:
-                gap_pp = max(0, (0.70 - fp) * 100)
-                big = f"+{gap_pp:.0f}%"
-                headline = f"浮盈再升 {gap_pp:.0f}%，进入止盈观察期"
+            paths = []
+            # A：浮盈≥100%
+            paths.append({
+                "prog": fp / 1.00,
+                "big": f"+{max(0, (1.00 - fp)) * 100:.0f}%",
+                "headline": f"浮盈再升 {max(0, (1.00 - fp)) * 100:.0f}%（达100%，无视估值），进入止盈观察期",
+                "current": f"浮盈 {fp*100:.0f}%（需≥100%）",
+            })
+            # B：PB≥80% 且 浮盈≥70%
+            if pb_pct is not None:
+                pb_prog, fp_prog = pb_pct / 0.80, fp / 0.70
+                if pb_prog <= fp_prog:
+                    h = f"PB 分位再升 {max(0, (0.80 - pb_pct)) * 100:.0f}%，进入止盈观察期"
+                    b = f"+{max(0, (0.80 - pb_pct)) * 100:.0f}%"
+                else:
+                    h = f"浮盈再升 {max(0, (0.70 - fp)) * 100:.0f}%，进入止盈观察期"
+                    b = f"+{max(0, (0.70 - fp)) * 100:.0f}%"
+                paths.append({
+                    "prog": min(pb_prog, fp_prog), "big": b, "headline": h,
+                    "current": f"PB 分位 {pb_pct*100:.0f}%（需≥80%） · 浮盈 {fp*100:.0f}%（需≥70%）",
+                })
+            # C：PE≥80% 且 浮盈≥80%
+            if pe_pct is not None:
+                pe_prog, fp_prog = pe_pct / 0.80, fp / 0.80
+                if pe_prog <= fp_prog:
+                    h = f"PE 分位再升 {max(0, (0.80 - pe_pct)) * 100:.0f}%，进入止盈观察期"
+                    b = f"+{max(0, (0.80 - pe_pct)) * 100:.0f}%"
+                else:
+                    h = f"浮盈再升 {max(0, (0.80 - fp)) * 100:.0f}%，进入止盈观察期"
+                    b = f"+{max(0, (0.80 - fp)) * 100:.0f}%"
+                paths.append({
+                    "prog": min(pe_prog, fp_prog), "big": b, "headline": h,
+                    "current": f"PE 分位 {pe_pct*100:.0f}%（需≥80%） · 浮盈 {fp*100:.0f}%（需≥80%）",
+                })
+            best = max(paths, key=lambda p: p["prog"])
             gaps.append({
                 "name": "止盈观察期",
-                "big": big,
-                "headline": headline,
-                "note": "进入后才武装止盈",
-                "current": f"PB 分位 {(pb_pct or 0)*100:.0f}%（需≥80%） · 浮盈 {fp*100:.0f}%（需≥70%）",
-                "progress": clamp01(min(pb_prog, fp_prog)),
+                "big": best["big"],
+                "headline": best["headline"],
+                "note": "三条路径满足任一即进入；进入后才武装止盈",
+                "current": best["current"],
+                "progress": clamp01(best["prog"]),
                 "tone": "neutral",
             })
 

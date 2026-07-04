@@ -1900,25 +1900,82 @@ class GitHubSyncer {
   ok() { return !!(this.cfg.owner && this.cfg.repo && this.cfg.pat); }
   load() { return this.cfg; }
 
-  async sync(csvContent) {
+  // 解析仓库里的 ledger.csv（支持带引号的 note，兼容早期无引号格式）
+  _parseLedgerCSV(text) {
+    const rows = [];
+    const lines = String(text || '').split(/\r?\n/);
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line.trim()) continue;
+      const m = line.match(/^([^,]*),([^,]*),([^,]*),([^,]*),"((?:[^"]|"")*)"\s*$/)
+             || line.match(/^([^,]*),([^,]*),([^,]*),([^,]*),(.*)$/);
+      if (!m) continue;
+      rows.push({ date: m[1].trim(), action: m[2].trim(),
+                  fen: Number(m[3]), price: Number(m[4]),
+                  note: (m[5] || '').replace(/""/g, '"') });
+    }
+    return rows;
+  }
+  _rowsToCSV(rows) {
+    const out = ['date,action,fen,price,note'];
+    for (const t of rows) {
+      const note = (t.note || '').replace(/"/g, '""');
+      out.push(`${t.date},${t.action},${t.fen},${t.price},"${note}"`);
+    }
+    return out.join('\n') + '\n';
+  }
+
+  // 读-改-写同步：以【仓库当前内容】为基底，只应用本地的增/改/删。
+  // 绝不用浏览器里的旧快照整文件覆盖仓库——否则在二次同步/多设备场景下会
+  // 静默丢行（2026-07-03 的减仓记录正是这样被抹掉的）。sha 冲突时重读重试。
+  async syncLedger(lm, attempt = 0) {
     const {owner, repo, pat} = this.cfg;
     if (!owner||!repo||!pat) throw new Error('请先在设置页填写 GitHub 信息');
     const base = `https://api.github.com/repos/${owner}/${repo}/contents/ledger.csv`;
     const headers = {'Authorization':`token ${pat}`, 'Accept':'application/vnd.github.v3+json',
                      'Content-Type':'application/json'};
-    let sha;
-    const get = await fetch(base, {headers});
-    if (get.ok) { sha = (await get.json()).sha; }
-    else if (get.status !== 404) throw new Error(`读取仓库文件失败 ${get.status}`);
+    let sha = null, rows = [];
+    const get = await fetch(base + '?_=' + Date.now(), {headers});
+    if (get.ok) {
+      const j = await get.json();
+      sha = j.sha;
+      try {
+        rows = this._parseLedgerCSV(
+          decodeURIComponent(escape(atob((j.content || '').replace(/\n/g, '')))));
+      } catch (e) { rows = []; }
+    } else if (get.status !== 404) {
+      throw new Error(`读取仓库文件失败 ${get.status}`);
+    }
 
-    // UTF-8 → base64
-    const bytes = new TextEncoder().encode(csvContent);
+    const keyOf = r => `${r.date}|${r.action}|${r.fen}|${r.price}`;
+    for (const l of lm.local) {
+      if (l._deletes || l._overrides) {
+        const orig = lm.committed.find(c => c.id === (l._deletes || l._overrides));
+        if (!orig) continue;
+        const i = rows.findIndex(r => keyOf(r) === keyOf(orig));
+        if (i >= 0) {
+          if (l._deletes) rows.splice(i, 1);
+          else rows[i] = {date:l.date, action:l.action, fen:l.fen, price:l.price, note:l.note||''};
+        }
+      } else if (!rows.some(r => keyOf(r) === keyOf(l))) {
+        rows.push({date:l.date, action:l.action, fen:l.fen, price:l.price, note:l.note||''});
+      }
+    }
+    rows.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+
+    const bytes = new TextEncoder().encode(this._rowsToCSV(rows));
     const b64 = btoa(Array.from(bytes, b => String.fromCharCode(b)).join(''));
     const body = {message:`记录成交 ${new Date().toISOString().slice(0,10)}`, content:b64};
     if (sha) body.sha = sha;
 
     const put = await fetch(base, {method:'PUT', headers, body:JSON.stringify(body)});
-    if (!put.ok) { const e=await put.json(); throw new Error(e.message||`提交失败 ${put.status}`); }
+    if (!put.ok) {
+      if ((put.status === 409 || put.status === 422) && attempt < 2) {
+        return this.syncLedger(lm, attempt + 1);   // sha 过期：重读仓库后重试
+      }
+      const e = await put.json().catch(() => ({}));
+      throw new Error(e.message || `提交失败 ${put.status}`);
+    }
     return await put.json();
   }
 
@@ -1979,13 +2036,14 @@ function setSyncBar(state, msg) {
 }
 
 async function autoSync() {
-  if (!GH.ok() || _syncBusy) return;
+  if (!GH.ok() || _syncBusy || !LM.hasUnsync()) return;   // 本地无待同步内容时绝不上传
   _syncBusy = true;
   setSyncBar('syncing', '正在同步到 GitHub…');
   try {
-    await GH.sync(LM.toCSV());
+    await GH.syncLedger(LM);   // 读-改-写：以仓库内容为基底，只应用本地改动
     try { await GH.triggerWorkflow(); } catch(e) { console.warn('触发工作流失败(非致命):', e); }
-    _syncBusy = false;          // 先解锁再 _save，避免循环触发
+    // 注意：清空 local 触发的 _save 必须发生在 _syncBusy=true 期间，
+    // 否则会再排一次"空同步"，用旧快照把刚写入的行覆盖掉（已发生过一次数据丢失）
     LM.local = [];
     LM._save();
     renderLedgerTable();
@@ -1993,8 +2051,9 @@ async function autoSync() {
     const t = new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'});
     setSyncBar('ok', `已同步 · 仪表盘约3分钟后刷新 · ${t}`);
   } catch(err) {
-    _syncBusy = false;
     setSyncBar('err', `同步失败：${err.message}`);
+  } finally {
+    _syncBusy = false;
   }
 }
 
@@ -2009,11 +2068,13 @@ function scheduleAutoSync() {
   _syncTimer = setTimeout(autoSync, 2000);
 }
 
-// 劫持 LM._save，每次本地保存后触发自动同步
+// 劫持 LM._save，每次本地保存后触发自动同步。
+// 只有 local 里真的有待同步内容才排程——同步成功后清空 local 的那次 _save
+// 绝不能再触发同步（那会用旧快照覆盖仓库，导致丢行）。
 const _lmSaveOrig = LM._save.bind(LM);
 LM._save = function() {
   _lmSaveOrig();
-  if (!_syncBusy) scheduleAutoSync();
+  if (!_syncBusy && LM.local.length > 0) scheduleAutoSync();
 };
 
 function openPanel(tab) {
@@ -2402,13 +2463,15 @@ function initPanel() {
     showToast('设置已保存');
   });
 
-  // 同步到 GitHub
+  // 同步到 GitHub（与 autoSync 同一条读-改-写路径，同一把锁）
   document.getElementById('sync-github-btn').addEventListener('click', async () => {
+    if (_syncBusy) return;
+    if (!LM.hasUnsync()) { showSyncStatus('没有待同步的本地修改。', 'ok'); return; }
+    _syncBusy = true;
     showSyncStatus('同步中…', 'ing');
     try {
-      await GH.sync(LM.toCSV());
+      await GH.syncLedger(LM);
       try { await GH.triggerWorkflow(); } catch(e) { console.warn('触发工作流失败(非致命):', e); }
-      _syncBusy = false;
       LM.local = [];
       LM._save();
       renderLedgerTable();
@@ -2420,6 +2483,8 @@ function initPanel() {
     } catch(err) {
       setSyncBar('err', `同步失败：${err.message}`);
       showSyncStatus('同步失败：' + err.message, 'err');
+    } finally {
+      _syncBusy = false;
     }
   });
 
