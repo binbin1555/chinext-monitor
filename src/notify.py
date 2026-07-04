@@ -71,8 +71,9 @@ class BarkNotifier:
         return self.failures == 0
 
     def send_signal(self, signal: dict, today_str: str,
-                    total_bought: int, total_fen: int = 150):
-        """推送买/卖信号。"""
+                    total_bought: int, total_fen: int = 150,
+                    fen_value: float = None):
+        """推送买/卖信号。fen_value=当前每份金额（复利滚入后每轮不同，买入类附带金额）。"""
         sig_type = signal.get("type", "")
         label    = SIGNAL_TYPE_LABELS.get(sig_type, f"📊 {sig_type}")
         fen      = signal.get("fen", 0)
@@ -81,6 +82,7 @@ class BarkNotifier:
         reason   = signal.get("reason", "")
         level    = signal.get("level", "active")
 
+        BUY_TYPES = ("T1", "T2", "T3", "weekly_6", "weekly_3", "rightside")
         body_lines = [reason]
         if price:
             body_lines.append(f"当前点位: {price:.0f}")
@@ -88,6 +90,8 @@ class BarkNotifier:
             body_lines.append(f"PB近10年分位: {pb_pct*100:.1f}%")
         if fen > 0:
             body_lines.append(f"操作份数: {fen}份（已买{total_bought}/{total_fen}份）")
+            if fen_value and sig_type in BUY_TYPES:
+                body_lines.append(f"每份约 ¥{fen_value:,.0f}，本次买入约 ¥{fen * fen_value:,.0f}")
         body_lines.append(f"日期: {today_str}")
 
         self._send(

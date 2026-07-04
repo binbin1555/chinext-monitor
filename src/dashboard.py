@@ -190,6 +190,8 @@ def generate_data_json(
             "position_value":     round(totals["position_value"]),
             "total_pnl":          round(totals["total_pnl"]),
             "total_return":       round(totals["total_return"], 4),
+            # 每份金额【复利滚入】：持仓中=本轮每份；空仓=按当前现金测算的下一轮每份
+            "fen_value":          round(totals.get("fen_value") or 0, 2),
             "has_reduced":        bool(th.get("has_reduced")),
             "has_exited":         bool(th.get("has_exited")),
             "completed_cycles":   completed_n,

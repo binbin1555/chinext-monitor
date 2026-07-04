@@ -146,7 +146,8 @@ def run_backtest(hist: pd.DataFrame, config: dict,
                 state = {
                     "cycle_id": state["cycle_id"] + 1,
                     "cycle_start_date": None,
-                    "fen_size": initial_capital / total_fen,
+                    # 复利滚入：新一轮每份=建仓首日总资金/150，事前未知
+                    "fen_size": None,
                     "t1_fired": False, "t2_fired": False, "t3_fired": False,
                     "rightside_used": False,
                     "armed": False, "reduced": False, "reduce_armed": False, "exited": False,

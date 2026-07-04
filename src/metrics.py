@@ -34,6 +34,7 @@ def build_nav_series(hist: pd.DataFrame, ledger: pd.DataFrame,
     cash       = initial_cap
     holdings   = 0.0   # 持有点位份额（元/点）
     held_fen   = 0     # 当前持仓份数（用于按"卖出前持仓"比例卖出）
+    per_fen    = None  # 当前轮每份金额【复利滚入】：新一轮首笔买入日=当时全部现金÷150
     nav_port   = []
 
     # 按日期将流水映射
@@ -54,7 +55,11 @@ def build_nav_series(hist: pd.DataFrame, ledger: pd.DataFrame,
             action = str(lrow["action"]).strip().lower()
             fen    = int(lrow["fen"])
             price  = float(lrow["price"])
-            amount = fen * (initial_cap / total_fen)  # 每份金额
+            # 复利滚入（手册§三）：持仓归零后的首笔买入=新一轮起点，
+            # 用"本金+全部历史收益"（即当时现金）重设 150 份
+            if action == "buy" and held_fen == 0:
+                per_fen = cash / total_fen
+            amount = fen * (per_fen if per_fen else initial_cap / total_fen)
 
             if action == "buy":
                 cash     -= amount
@@ -139,18 +144,20 @@ def calc_asset_totals(hist: pd.DataFrame, events: pd.DataFrame, config: dict) ->
       position_value 当前持仓市值
       total_pnl      总盈亏 = 总资产 − 本金
       total_return   总收益率
-    口径与 build_nav_series 完全一致（每份=initial_cap/total_fen，归一到 initial_cap）。
+      fen_value      当前每份金额（持仓中=本轮每份；空仓=按当前现金测算的下一轮每份）
+    口径与 build_nav_series 完全一致【复利滚入】：每轮首笔买入日，用当时全部现金
+    （本金+历史收益）÷ total_fen 重设每份金额（手册§三，2026-07-04 修订）。
     """
     initial_cap = float(config.get("initial_capital", 2_000_000))
     total_fen   = int(config.get("total_fen", 150))
     cash_rate   = float(config.get("cash_rate_annual", 0.02))
     start_date  = config.get("start_date", "2023-01-01")
-    per_fen     = initial_cap / total_fen
 
     sub = hist[hist["date"] >= start_date].reset_index(drop=True)
     if len(sub) == 0:
         return dict(total_assets=initial_cap, cash=initial_cap, position_value=0.0,
-                    total_pnl=0.0, total_return=0.0)
+                    total_pnl=0.0, total_return=0.0,
+                    fen_value=initial_cap / total_fen)
 
     lbd = {}
     if events is not None and len(events) > 0:
@@ -158,6 +165,7 @@ def calc_asset_totals(hist: pd.DataFrame, events: pd.DataFrame, config: dict) ->
             lbd.setdefault(str(r["date"]), []).append(r)
 
     cash = initial_cap; holdings = 0.0; held = 0; last_close = None
+    per_fen = None   # 当前轮每份金额（复利滚入：新一轮首笔买入日以当时现金重设）
     for i in range(len(sub)):
         c = float(sub["close"].iloc[i])
         if np.isnan(c):
@@ -165,7 +173,9 @@ def calc_asset_totals(hist: pd.DataFrame, events: pd.DataFrame, config: dict) ->
         last_close = c
         for r in lbd.get(str(sub["date"].iloc[i]), []):
             a = str(r["action"]).lower(); fen = int(r["fen"]); pr = float(r["price"])
-            amt = fen * per_fen
+            if a == "buy" and held == 0:
+                per_fen = cash / total_fen   # 复利滚入：本金+全部历史收益等分150份
+            amt = fen * (per_fen if per_fen else initial_cap / total_fen)
             if a == "buy":
                 cash -= amt; holdings += (amt / pr if pr else 0); held += fen
             elif a in ("reduce", "exit"):
@@ -175,9 +185,11 @@ def calc_asset_totals(hist: pd.DataFrame, events: pd.DataFrame, config: dict) ->
 
     position_value = holdings * (last_close or 0.0)
     total_assets   = cash + position_value
+    fen_value = per_fen if (held > 0 and per_fen) else cash / total_fen
     return dict(total_assets=total_assets, cash=cash, position_value=position_value,
                 total_pnl=total_assets - initial_cap,
-                total_return=total_assets / initial_cap - 1)
+                total_return=total_assets / initial_cap - 1,
+                fen_value=fen_value)
 
 
 def calc_performance(nav_series: pd.Series, start_date: str,

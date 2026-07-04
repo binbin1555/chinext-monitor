@@ -29,7 +29,8 @@ import yaml
 from src.fetch    import update_history
 from src.engine   import (Engine, recalc_from_ledger, calc_warnings,
                            theoretical_position, bootstrap_cycle_from_history)
-from src.metrics  import build_nav_series, calc_performance, calc_gaps, build_theoretical_ledger
+from src.metrics  import (build_nav_series, calc_performance, calc_gaps,
+                           build_theoretical_ledger, calc_asset_totals)
 from src.notify   import BarkNotifier
 from src.dashboard import generate_data_json, load_acknowledged_keys, filter_pending_signals
 import src.health as health
@@ -188,6 +189,8 @@ def main():
         state.update({
             "cycle_id": old_cycle + 1,
             "cycle_start_date": new_start,
+            # 复利滚入：新一轮每份金额=建仓首笔买入日的全部资金÷150，事前未知
+            "fen_size": None,
             "t1_fired": False, "t2_fired": False, "t3_fired": False,
             "rightside_used": False, "armed": False, "reduced": False,
             "reduce_armed": False,
@@ -249,12 +252,21 @@ def main():
         warnings = calc_warnings(hist, today_str, state, ledger, config)
         health.mark(state, "engine", "ok")
 
-        # Step 4：推送信号（"已买X/150"用策略理论进度，与信号口径一致）
+        # Step 4：推送信号（"已买X/150"用策略理论进度，与信号口径一致；
+        # 买入类附带每份金额——复利滚入后每轮份值不同，执行时需要知道买多少钱）
         if not args.no_push:
             ls = theoretical_position(state, total_fen)
+            _fen_value = None
+            if signals:
+                try:
+                    _fen_value = calc_asset_totals(
+                        hist, build_theoretical_ledger(state), config).get("fen_value")
+                except Exception as _e:
+                    logger.warning(f"每份金额计算失败（推送不带金额）: {_e}")
             for sig in signals:
                 notifier.send_signal(sig, today_str,
-                                      ls.get("total_bought", 0), total_fen)
+                                      ls.get("total_bought", 0), total_fen,
+                                      fen_value=_fen_value)
             if warnings:
                 notifier.send_warnings(warnings, today_str)
 
