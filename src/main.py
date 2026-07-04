@@ -45,6 +45,20 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _is_market_open_day(date_str: str) -> bool:
+    """判断指定日期是否为 A 股交易日。
+
+    优先使用 chinese_calendar 包（chinesecalendar）：内置国务院官方放假安排，
+    能正确识别法定节假日及补班周六（补班周六是交易日，返回 True）。
+    若包未安装或数据不覆盖该日期，回退到仅排除周六/周日的简单判断。
+    """
+    try:
+        from chinese_calendar import is_workday
+        return is_workday(datetime.strptime(date_str, "%Y-%m-%d").date())
+    except Exception:
+        return datetime.strptime(date_str, "%Y-%m-%d").weekday() < 5
+
+
 def load_config():
     with open(ROOT / "config.yaml", encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -92,10 +106,9 @@ def main():
 
     # ── Step 1：更新数据 ──
     if not args.report_only:
-        _today_weekday = datetime.strptime(today_str, "%Y-%m-%d").weekday()  # 0=Mon, 6=Sun
-        if _today_weekday >= 5:
-            # 周末：理杏仁无交易数据属正常，跳过拉取直接用缓存，不发错误告警
-            logger.info(f"今日 {today_str} 为{'周六' if _today_weekday == 5 else '周日'}，跳过拉取，使用缓存数据")
+        if not _is_market_open_day(today_str):
+            # 非交易日（周末 / 法定节假日）：理杏仁无数据属正常，跳过拉取直接用缓存
+            logger.info(f"今日 {today_str} 为非交易日（周末或法定节假日），跳过拉取，使用缓存数据")
             csv_path = data_dir / "history.csv"
             hist = pd.read_csv(csv_path, dtype={"date": str}) if csv_path.exists() else pd.DataFrame()
             health.mark(state, "lixinger", "ok")
@@ -127,9 +140,10 @@ def main():
     latest_date = hist["date"].max()
     if latest_date != today_str:
         logger.info(f"今日（{today_str}）最新数据为 {latest_date}，非新交易日，跳过引擎运行")
-        # 工作日却没有今日数据：可能是节假日，也可能是数据延迟/定时器过早——提示一次（每日去重）
-        is_weekday = datetime.strptime(today_str, "%Y-%m-%d").weekday() < 5
-        if (is_weekday and not args.no_push and not args.report_only
+        # 确认为交易日却没有今日数据：数据延迟或定时器过早——提示一次（每日去重）
+        # 非交易日（节假日/周末）静默跳过，不发通知
+        if (_is_market_open_day(today_str)
+                and not args.no_push and not args.report_only
                 and state.get("last_stale_alert") != today_str):
             notifier.send_info(
                 f"ℹ️ 今日暂无新交易数据（{today_str}）",
