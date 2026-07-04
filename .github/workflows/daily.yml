@@ -36,7 +36,11 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          # 强制升级节假日包：国务院每年11月发布次年放假安排，包随即更新；
+          # pip cache 以 requirements.txt 哈希为 key，不会自动拿到新版，需手动升级。
+          pip install --upgrade chinesecalendar
 
       - name: Run monitor
         env:

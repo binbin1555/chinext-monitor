@@ -50,12 +50,19 @@ def _is_market_open_day(date_str: str) -> bool:
 
     优先使用 chinese_calendar 包（chinesecalendar）：内置国务院官方放假安排，
     能正确识别法定节假日及补班周六（补班周六是交易日，返回 True）。
-    若包未安装或数据不覆盖该日期，回退到仅排除周六/周日的简单判断。
+
+    包不可用或数据不覆盖该年份时，按以下安全方向 fallback：
+    - 工作日（周一~周五）→ 视为交易日（True）：绝不漏掉真实信号
+    - 周末（周六/日）    → 视为非交易日（False）：无数据可拉，保守跳过
+    代价：工作日法定节假日会发 🔴 误报，但永不漏 Bark。
+    （每年11月包更新后，workflow 的 pip upgrade 会自动拿到次年数据消除误报）
     """
     try:
         from chinese_calendar import is_workday
         return is_workday(datetime.strptime(date_str, "%Y-%m-%d").date())
     except Exception:
+        # 包未安装 / 该年数据未覆盖：按星期安全降级
+        # 工作日默认为交易日（防漏），周末默认为非交易日（防误拉）
         return datetime.strptime(date_str, "%Y-%m-%d").weekday() < 5
 
 
