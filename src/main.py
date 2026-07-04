@@ -92,21 +92,29 @@ def main():
 
     # ── Step 1：更新数据 ──
     if not args.report_only:
-        try:
-            hist = update_history(config, data_dir)
-            health.mark(state, "lixinger", "ok")
-            _check_qieman_health(state, hist)
-        except Exception as e:
-            logger.error(f"理杏仁数据拉取失败: {e}")
-            health.mark(state, "lixinger", "down", health.classify_fetch_error(e))
-            _flush_health(state, notifier, args, today_str)   # 明确告知哪出问题+怎么修
-            # 仅用缓存刷新仪表盘展示（含健康横幅），不运行引擎
+        _today_weekday = datetime.strptime(today_str, "%Y-%m-%d").weekday()  # 0=Mon, 6=Sun
+        if _today_weekday >= 5:
+            # 周末：理杏仁无交易数据属正常，跳过拉取直接用缓存，不发错误告警
+            logger.info(f"今日 {today_str} 为{'周六' if _today_weekday == 5 else '周日'}，跳过拉取，使用缓存数据")
             csv_path = data_dir / "history.csv"
-            if csv_path.exists():
-                hist_cache = pd.read_csv(csv_path, dtype={"date": str})
-                _update_dashboard(hist_cache, state, ledger, config, docs_dir)
-            save_state(state)         # 持久化健康状态
-            return  # 严禁继续运行策略引擎
+            hist = pd.read_csv(csv_path, dtype={"date": str}) if csv_path.exists() else pd.DataFrame()
+            health.mark(state, "lixinger", "ok")
+        else:
+            try:
+                hist = update_history(config, data_dir)
+                health.mark(state, "lixinger", "ok")
+                _check_qieman_health(state, hist)
+            except Exception as e:
+                logger.error(f"理杏仁数据拉取失败: {e}")
+                health.mark(state, "lixinger", "down", health.classify_fetch_error(e))
+                _flush_health(state, notifier, args, today_str)   # 明确告知哪出问题+怎么修
+                # 仅用缓存刷新仪表盘展示（含健康横幅），不运行引擎
+                csv_path = data_dir / "history.csv"
+                if csv_path.exists():
+                    hist_cache = pd.read_csv(csv_path, dtype={"date": str})
+                    _update_dashboard(hist_cache, state, ledger, config, docs_dir)
+                save_state(state)         # 持久化健康状态
+                return  # 严禁继续运行策略引擎
     else:
         csv_path = data_dir / "history.csv"
         hist = pd.read_csv(csv_path, dtype={"date": str}) if csv_path.exists() else pd.DataFrame()
