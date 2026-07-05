@@ -192,6 +192,88 @@ def calc_asset_totals(hist: pd.DataFrame, events: pd.DataFrame, config: dict) ->
                 fen_value=fen_value)
 
 
+def calc_fundamental_sentinel(hist: pd.DataFrame) -> dict:
+    """
+    基本面哨兵（价值陷阱预警）——监测创业板指的"每点净资产"与"每点盈利"增速。
+
+    原理：低 PB 分位是"真便宜"的前提是分母（净资产 B）没有萎缩。
+    B = close / pb，E = close / pe_ttm（均为指数每点口径，只用比率，与规模无关）。
+    若 B 连续两年负增长，"便宜"很可能来自分母塌陷——价值陷阱特征成立，
+    低 PB 分位失真，买入信号可信度下降，需人工评估择时仓位。
+
+    计算：滚动 250 交易日窗口（≈1年）均值，逐窗口同比：
+      b_g1 = 最近一年B均值 / 上一年 − 1      b_g2 = 上一年 / 上上年 − 1
+    状态判定（只用 B；盈利 E 波动天然大，仅展示不参与判定）：
+      ok     b_g1 ≥ 0                    净资产仍在增长，低PB分位可信
+      watch  b_g1 < 0 且 b_g2 ≥ 0        单年负增长（可能是一次性减值），观察
+      alert  b_g1 < 0 且 b_g2 < 0        连续两年负增长 → 价值陷阱警报
+      na     有效数据不足 500 个交易日     无法评估
+    """
+    out = {"status": "na", "b_g1": None, "b_g2": None, "e_g1": None,
+           "b_yearly": [], "detail": "历史数据不足，暂无法评估"}
+    if hist is None or len(hist) == 0:
+        return out
+
+    df = hist[["date", "close", "pb", "pe_ttm"]].copy()
+    for c in ("close", "pb", "pe_ttm"):
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    valid_b = df[(df["close"] > 0) & (df["pb"] > 0)].reset_index(drop=True)
+    b = (valid_b["close"] / valid_b["pb"]).values
+
+    def _win_mean(arr, k):
+        """倒数第 k 个 250 日窗口均值（k=0 最近）；数据不足返回 None。"""
+        end = len(arr) - k * 250
+        start = end - 250
+        if start < 0:
+            return None
+        return float(np.mean(arr[start:end]))
+
+    w0, w1, w2 = _win_mean(b, 0), _win_mean(b, 1), _win_mean(b, 2)
+    if w0 is not None and w1 is not None:
+        out["b_g1"] = w0 / w1 - 1
+    if w1 is not None and w2 is not None:
+        out["b_g2"] = w1 / w2 - 1
+
+    # 每点盈利（仅展示）：PE 可能为负/极端值，只取正值行
+    valid_e = df[(df["close"] > 0) & (df["pe_ttm"] > 0)].reset_index(drop=True)
+    e = (valid_e["close"] / valid_e["pe_ttm"]).values
+    e0, e1 = _win_mean(e, 0), _win_mean(e, 1)
+    if e0 is not None and e1 is not None:
+        out["e_g1"] = e0 / e1 - 1
+
+    # 自然年 B 均值同比（页面展示历史脉络；当年需 ≥120 个有效交易日才计入）
+    vb = valid_b.copy()
+    vb["year"] = vb["date"].str[:4]
+    vb["b"] = vb["close"] / vb["pb"]
+    yearly = vb.groupby("year")["b"].agg(["mean", "count"])
+    yearly = yearly[yearly["count"] >= 120]
+    years = yearly.index.tolist()
+    for i in range(1, len(years)):
+        g = float(yearly["mean"].iloc[i] / yearly["mean"].iloc[i - 1] - 1)
+        out["b_yearly"].append({"year": int(years[i]), "growth": round(g, 4)})
+
+    # ── 状态判定 ──
+    g1, g2 = out["b_g1"], out["b_g2"]
+    if g1 is None:
+        return out
+    pct = lambda v: f"{v*100:+.1f}%"
+    if g1 >= 0:
+        out["status"] = "ok"
+        out["detail"] = (f"指数每点净资产近一年 {pct(g1)}，基本面仍在增长，"
+                         f"低 PB 分位是可信的便宜。")
+    elif g2 is None or g2 >= 0:
+        out["status"] = "watch"
+        out["detail"] = (f"指数每点净资产近一年 {pct(g1)}（转负）。单年负增长可能是"
+                         f"商誉减值等一次性因素，暂观察；若连续两年负增长将升级为警报。")
+    else:
+        out["status"] = "alert"
+        out["detail"] = (f"指数每点净资产连续两年负增长（{pct(g2)}、{pct(g1)}）——"
+                         f"价值陷阱特征成立：低 PB 分位可能来自净资产塌陷而非真便宜，"
+                         f"买入信号可信度下降。请人工评估是否降低择时策略的资金配置。")
+    return out
+
+
 def calc_performance(nav_series: pd.Series, start_date: str,
                      risk_free_rate: float = 0.02) -> dict:
     """

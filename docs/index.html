@@ -196,6 +196,28 @@
   .mini-track { height:3px; background:var(--surface2); border-radius:2px; margin-top:8px; overflow:hidden; max-width:84px; }
   .mini-fill { height:100%; background:var(--blue); border-radius:2px; transition:width .4s ease; }
 
+  /* ── 基本面哨兵（价值陷阱预警）── */
+  .sentinel-card {
+    background:rgba(255,255,255,0.5);
+    border:1px solid var(--border2);
+    border-radius:14px;
+    padding:13px 15px; margin-bottom:18px;
+  }
+  .sentinel-card.watch { border-color:var(--orange); background:rgba(224,134,0,.07); }
+  .sentinel-card.alert { border-color:var(--red); background:rgba(224,57,43,.08); }
+  .sc-head  { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .sc-title { font-size:11px; font-weight:500; color:var(--text3); }
+  .sc-pill  { font-size:12px; font-weight:700; }
+  .sentinel-card.ok    .sc-pill { color:var(--green); }
+  .sentinel-card.watch .sc-pill { color:var(--orange); }
+  .sentinel-card.alert .sc-pill { color:var(--red); }
+  .sc-body   { font-size:13px; color:var(--text); margin-top:8px; }
+  .sc-detail { font-size:11px; color:var(--text2); margin-top:5px; line-height:1.55; }
+  .sc-years  { font-size:10px; color:var(--text3); margin-top:8px;
+               display:flex; flex-wrap:wrap; gap:4px 6px; align-items:center; }
+  .sc-chip { padding:1px 7px; border-radius:8px; background:var(--surface2); color:var(--text2); }
+  .sc-chip.neg { background:rgba(224,57,43,.12); color:var(--red); }
+
   /* ── 图表区 ── */
   .chart-section { margin-bottom:16px; }
   .chart-card {
@@ -695,6 +717,16 @@
       <div class="mini-track"><div class="mini-fill" id="kpi-fen-bar" style="width:0%"></div></div>
       <div class="mini-sub" id="kpi-fen-sub">策略目标</div>
     </div>
+  </div>
+
+  <!-- ═══ 基本面哨兵（价值陷阱预警）：低PB分位可信度的独立防线 ═══ -->
+  <div class="sentinel-card" id="sentinel-card" style="display:none">
+    <div class="sc-head">
+      <span class="sc-title">基本面哨兵 · 价值陷阱预警（指数每点净资产增速）</span>
+      <span class="sc-pill" id="sentinel-pill">--</span>
+    </div>
+    <div class="sc-body" id="sentinel-body"></div>
+    <div class="sc-years" id="sentinel-years"></div>
   </div>
 
   <!-- ── 主图：点位 + MA + 买卖标记 ── -->
@@ -1281,6 +1313,35 @@ function renderWarnings(d) {
   document.getElementById('warn-section').style.display = 'block';
   document.getElementById('warn-list').innerHTML = d.warnings
     .map(w => `<div class="warn-item">${w}</div>`).join('');
+}
+
+// ═══════════════════════════════════════════════════════════
+// 基本面哨兵（价值陷阱预警）：每点净资产增速 —— 低PB分位可信度的独立防线
+// ═══════════════════════════════════════════════════════════
+function renderSentinel(d) {
+  const card = document.getElementById('sentinel-card');
+  if (!card) return;
+  const s = d.sentinel;
+  if (!s || s.status === 'na' || s.b_g1 == null) { card.style.display = 'none'; return; }
+
+  const cls = (s.status === 'alert' || s.status === 'watch') ? s.status : 'ok';
+  card.className = 'sentinel-card ' + cls;
+  document.getElementById('sentinel-pill').textContent =
+    s.status === 'alert' ? '🔴 警报' : s.status === 'watch' ? '🟡 观察' : '🟢 正常';
+
+  const pct = v => (v == null ? 'N/A' : (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + '%');
+  document.getElementById('sentinel-body').innerHTML =
+    `每点净资产：近一年 <b>${pct(s.b_g1)}</b> · 前一年 ${pct(s.b_g2)}` +
+    `　｜　每点盈利：近一年 ${pct(s.e_g1)}` +
+    `<div class="sc-detail">${esc(s.detail || '')}</div>`;
+
+  const ys = (s.b_yearly || []).slice(-6);
+  document.getElementById('sentinel-years').innerHTML = ys.length
+    ? '<span>净资产年增速</span>' + ys.map(y =>
+        `<span class="sc-chip${y.growth < 0 ? ' neg' : ''}">${y.year} ${pct(y.growth)}</span>`
+      ).join('')
+    : '';
+  card.style.display = 'block';
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2531,6 +2592,7 @@ function showToast(msg) {
     renderKPIs(DATA);
     renderGaps(DATA);
     renderWarnings(DATA);
+    renderSentinel(DATA);
     renderDataFreshness(DATA);
     checkStaleAndRetry(DATA);
     renderHealthBanner(DATA);

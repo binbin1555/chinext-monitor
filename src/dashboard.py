@@ -143,6 +143,18 @@ def generate_data_json(
     # 总资产口径（总资产 = 持仓市值 + 已止盈落袋现金）——按【策略理论账本】计算，
     # 与用户是否手动记账无关，确保减仓后总资产不因"少显示落袋钱"而虚减。
     totals      = calc_asset_totals(hist, _events, config)
+
+    # 基本面哨兵（价值陷阱预警）：每点净资产/盈利增速，独立于系统健康
+    from src.metrics import calc_fundamental_sentinel
+    sentinel = calc_fundamental_sentinel(hist)
+    sentinel_json = {
+        "status":   sentinel["status"],
+        "b_g1":     _round4(sentinel["b_g1"]),
+        "b_g2":     _round4(sentinel["b_g2"]),
+        "e_g1":     _round4(sentinel["e_g1"]),
+        "b_yearly": sentinel["b_yearly"],
+        "detail":   sentinel["detail"],
+    }
     completed_n = len(state.get("completed_cycles", []) or [])
 
     # 过滤待执行：已确认的移除、买入类超期移除、卖出类永不过期（跨设备生效，无需 PAT）
@@ -218,6 +230,8 @@ def generate_data_json(
         },
         "gaps":     gaps,
         "warnings": warnings,
+        # 基本面哨兵：低PB分位可信度的独立防线（价值陷阱预警）
+        "sentinel": sentinel_json,
         "committed_ledger": _export_ledger(ledger),
         "trigger_log":      state.get("trigger_log", []),
         # 系统健康：组件状态 + 修复方法，供页面显眼横幅展示

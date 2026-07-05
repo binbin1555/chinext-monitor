@@ -30,7 +30,8 @@ from src.fetch    import update_history
 from src.engine   import (Engine, recalc_from_ledger, calc_warnings,
                            theoretical_position, bootstrap_cycle_from_history)
 from src.metrics  import (build_nav_series, calc_performance, calc_gaps,
-                           build_theoretical_ledger, calc_asset_totals)
+                           build_theoretical_ledger, calc_asset_totals,
+                           calc_fundamental_sentinel)
 from src.notify   import BarkNotifier
 from src.dashboard import generate_data_json, load_acknowledged_keys, filter_pending_signals
 import src.health as health
@@ -298,6 +299,16 @@ def main():
                                       fen_value=_fen_value)
             if warnings:
                 notifier.send_warnings(warnings, today_str)
+
+        # Step 4.5：基本面哨兵（价值陷阱预警）——每点净资产增速监测。
+        # 只在状态迁移时推送一次（ok↔watch↔alert），不每日重复；na 不推送。
+        sentinel = calc_fundamental_sentinel(hist)
+        prev_sentinel = state.get("sentinel_status", "ok")
+        if sentinel["status"] != "na" and sentinel["status"] != prev_sentinel:
+            logger.info(f"基本面哨兵状态变化: {prev_sentinel} → {sentinel['status']}")
+            if not args.no_push:
+                notifier.send_sentinel(sentinel["status"], sentinel["detail"], today_str)
+            state["sentinel_status"] = sentinel["status"]
 
         # Step 5：记录 pending signals + 永久触发日志（同日同类型去重）
         state.setdefault("trigger_log", [])

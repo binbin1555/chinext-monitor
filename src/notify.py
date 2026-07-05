@@ -203,3 +203,17 @@ class BarkNotifier:
     def send_info(self, title: str, body: str):
         """一般信息通知（如数据延迟提示），不打扰为 timeSensitive。"""
         self._send(title=title, body=body, level="active")
+
+    def send_sentinel(self, status: str, detail: str, today_str: str = ""):
+        """
+        基本面哨兵（价值陷阱预警）状态变化通知——只在状态迁移时发送（main.py 去重）。
+        alert=净资产连续两年负增长（强提醒）；watch=单年转负（观察）；ok=恢复。
+        """
+        suffix = f"（{today_str}）" if today_str else ""
+        if status == "alert":
+            title, level = f"🔴 基本面哨兵警报{suffix}", "timeSensitive"
+        elif status == "watch":
+            title, level = f"🟡 基本面哨兵：进入观察{suffix}", "active"
+        else:
+            title, level = f"🟢 基本面哨兵恢复正常{suffix}", "active"
+        self._send(title=title, body=detail, level=level, url=DASHBOARD_URL)
