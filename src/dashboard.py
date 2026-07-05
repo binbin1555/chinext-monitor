@@ -38,6 +38,41 @@ def load_acknowledged_keys(root_dir) -> set:
 
 BUY_TYPES = {"T1", "T2", "T3", "weekly_3", "weekly_6", "rightside"}
 
+SENTINEL_ACK_VALID_DAYS = 400   # 确诊有效期≈跨一个年报周期；超期或状态升级需重新确诊
+
+
+def _load_sentinel_ack(root_dir, status: str):
+    """
+    读取 acknowledged.json 中的哨兵确诊记录（type=sentinel_watch/sentinel_alert）。
+    仅当【确诊的状态 == 当前状态】且【确诊日期在有效期内】才返回，保证：
+      - watch 时的确诊不会静默后来升级的 alert（状态升级 = 新警报，需重新确诊）
+      - 多年后的新一轮警报不会被旧确诊静默（超过 400 天失效）
+    返回 {"date":..., "note":...} 或 None。
+    """
+    if status not in ("watch", "alert"):
+        return None
+    path = Path(root_dir) / "acknowledged.json"
+    if not path.exists():
+        return None
+    try:
+        entries = json.load(open(path, encoding="utf-8")) or []
+    except Exception:
+        return None
+    want = f"sentinel_{status}"
+    best = None
+    for e in entries:
+        if not isinstance(e, dict) or e.get("type") != want:
+            continue
+        d = str(e.get("date", ""))[:10]
+        try:
+            age = (datetime.now() - datetime.strptime(d, "%Y-%m-%d")).days
+        except Exception:
+            continue
+        if 0 <= age <= SENTINEL_ACK_VALID_DAYS:
+            if best is None or d > best["date"]:
+                best = {"date": d, "note": str(e.get("note", "") or "")}
+    return best
+
 
 def filter_pending_signals(pending, hist_dates, latest_date, ack_keys, expire_buy_days):
     """
@@ -154,6 +189,8 @@ def generate_data_json(
         "e_g1":     _round4(sentinel["e_g1"]),
         "b_yearly": sentinel["b_yearly"],
         "detail":   sentinel["detail"],
+        # 用户已完成人工确诊（acknowledged.json 中的 sentinel_* 记录，跨设备生效）
+        "acked":    _load_sentinel_ack(docs_dir.parent, sentinel["status"]),
     }
     completed_n = len(state.get("completed_cycles", []) or [])
 

@@ -217,6 +217,14 @@
                display:flex; flex-wrap:wrap; gap:4px 6px; align-items:center; }
   .sc-chip { padding:1px 7px; border-radius:8px; background:var(--surface2); color:var(--text2); }
   .sc-chip.neg { background:rgba(224,57,43,.12); color:var(--red); }
+  .sc-check { margin-top:10px; padding:10px 12px; border-radius:10px;
+              background:var(--surface2); font-size:12px; color:var(--text);
+              line-height:1.7; }
+  .sc-check > div { margin-top:4px; color:var(--text2); }
+  .sc-ack-btn { margin-top:10px; padding:6px 14px; border:none; border-radius:9px;
+                background:var(--green); color:#fff; font-size:12px; font-weight:600;
+                cursor:pointer; }
+  .sc-ack-btn:hover { opacity:.85; }
 
   /* ── 图表区 ── */
   .chart-section { margin-bottom:16px; }
@@ -1318,22 +1326,55 @@ function renderWarnings(d) {
 // ═══════════════════════════════════════════════════════════
 // 基本面哨兵（价值陷阱预警）：每点净资产增速 —— 低PB分位可信度的独立防线
 // ═══════════════════════════════════════════════════════════
+const SENTINEL_ACK_DAYS = 400;   // 确诊有效期≈跨一个年报周期，与服务端一致
+
+function _sentinelLocalAck(status) {
+  // 本机确诊记录（未配置 PAT 时的回退；配置后以服务端 acked 为准）
+  try {
+    const a = JSON.parse(localStorage.getItem('sentinel_ack') || 'null');
+    if (!a || a.status !== status) return null;   // 状态升级 = 新警报，需重新确诊
+    const age = (Date.now() - new Date(a.date).getTime()) / 86400000;
+    return (age >= 0 && age <= SENTINEL_ACK_DAYS) ? a : null;
+  } catch(e) { return null; }
+}
+
 function renderSentinel(d) {
   const card = document.getElementById('sentinel-card');
   if (!card) return;
   const s = d.sentinel;
   if (!s || s.status === 'na' || s.b_g1 == null) { card.style.display = 'none'; return; }
 
-  const cls = (s.status === 'alert' || s.status === 'watch') ? s.status : 'ok';
-  card.className = 'sentinel-card ' + cls;
-  document.getElementById('sentinel-pill').textContent =
-    s.status === 'alert' ? '🔴 警报' : s.status === 'watch' ? '🟡 观察' : '🟢 正常';
+  const pct   = v => (v == null ? 'N/A' : (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + '%');
+  const nonOk = (s.status === 'alert' || s.status === 'watch');
+  const ack   = nonOk ? (s.acked || _sentinelLocalAck(s.status)) : null;
 
-  const pct = v => (v == null ? 'N/A' : (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + '%');
-  document.getElementById('sentinel-body').innerHTML =
+  card.className = 'sentinel-card ' + (ack || !nonOk ? 'ok' : s.status);
+  document.getElementById('sentinel-pill').textContent =
+    ack ? '✓ 已确诊' : (s.status === 'alert' ? '🔴 警报' : s.status === 'watch' ? '🟡 观察' : '🟢 正常');
+
+  let html =
     `每点净资产：近一年 <b>${pct(s.b_g1)}</b> · 前一年 ${pct(s.b_g2)}` +
     `　｜　每点盈利：近一年 ${pct(s.e_g1)}` +
     `<div class="sc-detail">${esc(s.detail || '')}</div>`;
+
+  if (ack) {
+    html += `<div class="sc-detail" style="color:var(--green);font-weight:600">` +
+      `✓ 已人工确诊（${esc(ack.date || '')}）：${esc(ack.note || '判定为周期性波动，策略照常执行')}` +
+      `</div><div class="sc-detail">状态升级或超过一个年报周期（400 天）后需重新确诊。</div>`;
+  } else if (nonOk) {
+    html +=
+      `<div class="sc-check">` +
+      `<b>📋 确诊清单（约 30 分钟，非紧急）</b>` +
+      `<div>① 打开理杏仁 → 创业板指 → 基本面，查「归属于母公司普通股股东的扣非ROE」` +
+      `（合并报表·<b>年报口径</b>），取近 5–8 年</div>` +
+      `<div>② 判别：深蹲后 1–2 年内 V 型回升（如 2018 年 5.1% → 2020 年 12.1%）＝` +
+      `<b>周期坑</b>；连续 3 年以上单边下行、且无商誉减值等一次性因素可解释＝<b>结构性塌陷</b></div>` +
+      `<div>③ 周期坑 → 点击【已确诊·解除】记录结论；结构性 → 冻结下一轮建仓` +
+      `（<b>不卖出</b>现有持仓——持仓去留仍由减仓/清仓规则决定）</div>` +
+      `<button class="sc-ack-btn" onclick="ackSentinel('${s.status}')">已确诊 · 解除警报</button>` +
+      `</div>`;
+  }
+  document.getElementById('sentinel-body').innerHTML = html;
 
   const ys = (s.b_yearly || []).slice(-6);
   document.getElementById('sentinel-years').innerHTML = ys.length
@@ -1342,6 +1383,24 @@ function renderSentinel(d) {
       ).join('')
     : '';
   card.style.display = 'block';
+}
+
+async function ackSentinel(status) {
+  const note = prompt('请填写确诊结论（将永久记录在案，供未来回看）：\n例如：2018商誉减值周期坑，扣非ROE已回升至12%，判定为周期性');
+  if (note === null) return;   // 用户取消
+  const today = new Date().toISOString().slice(0, 10);
+  const rec = {status, date: today, note: (note || '').trim()};
+  localStorage.setItem('sentinel_ack', JSON.stringify(rec));
+  if (GH.ok()) {
+    try {
+      await GH.appendAcknowledged({type: 'sentinel_' + status, date: today, fen: 0, note: rec.note});
+      showToast('已确诊解除（跨设备生效）');
+    } catch(e) { showToast('已在本机解除；跨设备同步失败：' + e.message); }
+  } else {
+    showToast('已在本机解除（未配置 GitHub 同步，仅本设备生效）');
+  }
+  if (DATA && DATA.sentinel) DATA.sentinel.acked = {date: today, note: rec.note};
+  renderSentinel(DATA);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2069,7 +2128,9 @@ class GitHubSyncer {
     }
     const key = sig.type + '_' + sig.date;
     if (!list.some(x => (x.key || (x.type+'_'+x.date)) === key)) {
-      list.push({key, type: sig.type, date: sig.date, fen: sig.fen, ts: new Date().toISOString()});
+      const entry = {key, type: sig.type, date: sig.date, fen: sig.fen, ts: new Date().toISOString()};
+      if (sig.note) entry.note = sig.note;   // 哨兵确诊结论等附注
+      list.push(entry);
     }
     const bytes = new TextEncoder().encode(JSON.stringify(list));
     const b64 = btoa(Array.from(bytes, b => String.fromCharCode(b)).join(''));

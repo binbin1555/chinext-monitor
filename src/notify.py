@@ -208,12 +208,18 @@ class BarkNotifier:
         """
         基本面哨兵（价值陷阱预警）状态变化通知——只在状态迁移时发送（main.py 去重）。
         alert=净资产连续两年负增长（强提醒）；watch=单年转负（观察）；ok=恢复。
+        警报语义：不涉及当前持仓，只决定下一轮建仓是否放行（手册附录 E4）。
         """
         suffix = f"（{today_str}）" if today_str else ""
+        body = detail
         if status == "alert":
             title, level = f"🔴 基本面哨兵警报{suffix}", "timeSensitive"
+            body += ("\n\n📋 下一步（约30分钟，不必今天完成）：\n"
+                     "打开仪表盘哨兵卡片，按确诊清单核对创业板指扣非ROE近5年趋势，"
+                     "确诊后点击【已确诊·解除】记录结论。")
         elif status == "watch":
             title, level = f"🟡 基本面哨兵：进入观察{suffix}", "active"
         else:
             title, level = f"🟢 基本面哨兵恢复正常{suffix}", "active"
-        self._send(title=title, body=detail, level=level, url=DASHBOARD_URL)
+            body = "指数每点净资产增速已转正，价值陷阱预警解除。" + f"\n{detail}"
+        self._send(title=title, body=body, level=level, url=DASHBOARD_URL)
