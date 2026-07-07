@@ -32,3 +32,6 @@ desktop.ini
 
 # Claude Code 内部目录（本地工具，不提交）
 .claude/
+
+# CI 内部交接文件：--defer-push 缓存待发送的 Bark 内容，--send-pending 读取后即删除
+pending_notify.json

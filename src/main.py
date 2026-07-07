@@ -3,8 +3,10 @@
 fetch → engine → metrics → notify → dashboard → commit（由 CI 完成）
 
 运行：python src/main.py
-     python src/main.py --fetch-only   # 仅更新数据，不发推送
-     python src/main.py --report-only  # 仅发日报，不重新拉数据
+     python src/main.py --fetch-only    # 仅更新数据，不发推送
+     python src/main.py --report-only   # 仅发日报，不重新拉数据
+     python src/main.py --defer-push    # 计算+写盘，推送缓存到 pending_notify.json 暂不发送
+     python src/main.py --send-pending  # 仅读取缓存并发送推送（git push + Pages 部署完成后调用）
 """
 import os
 import sys
@@ -94,11 +96,60 @@ def load_ledger():
     return pd.DataFrame(columns=["date", "action", "fen", "price", "note"])
 
 
+PENDING_NOTIFY_PATH = ROOT / "pending_notify.json"
+
+
+def _json_default(o):
+    """numpy 标量（float64/int64）转原生类型，其余兜底转字符串。"""
+    if hasattr(o, "item"):
+        return o.item()
+    return str(o)
+
+
+def _send_pending(state, notifier, today_str):
+    """读取 --defer-push 阶段缓存的推送内容并实际发送。
+    用于 git push + GitHub Pages 部署完成之后调用，避免 Bark 通知早于网页数据上线（见手册运维记录）。"""
+    if not PENDING_NOTIFY_PATH.exists():
+        logger.info("无待发送推送缓存，跳过")
+        return
+    with open(PENDING_NOTIFY_PATH, encoding="utf-8") as f:
+        payload = json.load(f)
+
+    for sig in payload.get("signals", []):
+        notifier.send_signal(sig, payload["today_str"], payload.get("total_bought", 0),
+                              payload.get("total_fen", 150), fen_value=payload.get("fen_value"))
+    if payload.get("warnings"):
+        notifier.send_warnings(payload["warnings"], payload["today_str"])
+    if payload.get("sentinel"):
+        s = payload["sentinel"]
+        notifier.send_sentinel(s["status"], s["detail"], payload["today_str"])
+    if payload.get("daily_report"):
+        dr = payload["daily_report"]
+        notifier.send_daily_report(
+            payload["today_str"], dr["perf"], state, dr["ledger_state"],
+            dr["today_row"], dr["warnings"], total_fen=payload.get("total_fen", 150))
+
+    bh = notifier.bark_healthy()
+    if bh is True:
+        health.mark(state, "bark", "ok")
+    elif bh is False:
+        health.mark(state, "bark", "down",
+                    f"推送失败 {notifier.failures}/{notifier.attempted} 次：{notifier.last_error}")
+    save_state(state)
+    if PENDING_NOTIFY_PATH.exists():
+        PENDING_NOTIFY_PATH.unlink()
+    logger.info("待发送推送已全部发出")
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--fetch-only",  action="store_true")
-    parser.add_argument("--report-only", action="store_true")
-    parser.add_argument("--no-push",     action="store_true")
+    parser.add_argument("--fetch-only",   action="store_true")
+    parser.add_argument("--report-only",  action="store_true")
+    parser.add_argument("--no-push",      action="store_true")
+    parser.add_argument("--defer-push",   action="store_true",
+                         help="计算+写盘正常进行，但推送内容缓存到 pending_notify.json，暂不发送")
+    parser.add_argument("--send-pending", action="store_true",
+                         help="仅读取 pending_notify.json 并发送推送，不重新拉取/计算")
     args = parser.parse_args()
 
     config  = load_config()
@@ -109,6 +160,10 @@ def main():
     data_dir  = ROOT / "data"
     docs_dir  = ROOT / "docs"
     today_str = date.today().strftime("%Y-%m-%d")
+
+    if args.send_pending:
+        _send_pending(state, notifier, today_str)
+        return
 
     logger.info(f"=== 创业板监测系统启动 {today_str} ===")
 
@@ -274,6 +329,7 @@ def main():
     # ── Step 3-8：引擎 + 推送 + 日报（统一异常兜底，失败即 Bark 告警）──
     try:
         cyc_start = state.get("cycle_start_date")
+        notify_payload = {"today_str": today_str, "total_fen": total_fen}
 
         # Step 3：运行策略引擎
         engine  = Engine(config, state, ledger, hist)
@@ -284,6 +340,8 @@ def main():
 
         # Step 4：推送信号（"已买X/150"用策略理论进度，与信号口径一致；
         # 买入类附带每份金额——复利滚入后每轮份值不同，执行时需要知道买多少钱）
+        # --defer-push 时先缓存，待 git push + Pages 部署完成后由 --send-pending 实际发送，
+        # 避免 Bark 通知早于网页数据上线（用户观察到点开通知要等2-3分钟才有当日数据）。
         if not args.no_push:
             ls = theoretical_position(state, total_fen)
             _fen_value = None
@@ -293,12 +351,18 @@ def main():
                         hist, build_theoretical_ledger(state), config).get("fen_value")
                 except Exception as _e:
                     logger.warning(f"每份金额计算失败（推送不带金额）: {_e}")
-            for sig in signals:
-                notifier.send_signal(sig, today_str,
-                                      ls.get("total_bought", 0), total_fen,
-                                      fen_value=_fen_value)
-            if warnings:
-                notifier.send_warnings(warnings, today_str)
+            if args.defer_push:
+                notify_payload["signals"] = signals
+                notify_payload["total_bought"] = ls.get("total_bought", 0)
+                notify_payload["fen_value"] = _fen_value
+                notify_payload["warnings"] = warnings
+            else:
+                for sig in signals:
+                    notifier.send_signal(sig, today_str,
+                                          ls.get("total_bought", 0), total_fen,
+                                          fen_value=_fen_value)
+                if warnings:
+                    notifier.send_warnings(warnings, today_str)
 
         # Step 4.5：基本面哨兵（价值陷阱预警）——每点净资产增速监测。
         # 只在状态迁移时推送一次（ok↔watch↔alert），不每日重复；na 不推送。
@@ -307,7 +371,10 @@ def main():
         if sentinel["status"] != "na" and sentinel["status"] != prev_sentinel:
             logger.info(f"基本面哨兵状态变化: {prev_sentinel} → {sentinel['status']}")
             if not args.no_push:
-                notifier.send_sentinel(sentinel["status"], sentinel["detail"], today_str)
+                if args.defer_push:
+                    notify_payload["sentinel"] = {"status": sentinel["status"], "detail": sentinel["detail"]}
+                else:
+                    notifier.send_sentinel(sentinel["status"], sentinel["detail"], today_str)
             state["sentinel_status"] = sentinel["status"]
 
         # Step 5：记录 pending signals + 永久触发日志（同日同类型去重）
@@ -345,13 +412,26 @@ def main():
             )
             today_row = hist[hist["date"] == today_str].iloc[0].to_dict() if len(
                 hist[hist["date"] == today_str]) > 0 else {}
-            notifier.send_daily_report(
-                today_str, perf, state, ls, today_row, warnings,
-                total_fen=total_fen,
-            )
+            if args.defer_push:
+                notify_payload["daily_report"] = {
+                    "perf": perf, "ledger_state": ls,
+                    "today_row": today_row, "warnings": warnings,
+                }
+            else:
+                notifier.send_daily_report(
+                    today_str, perf, state, ls, today_row, warnings,
+                    total_fen=total_fen,
+                )
+
+        # Step 7.5：--defer-push 缓存写盘（供 git push + Pages 部署完成后 --send-pending 读取）
+        if args.defer_push and not args.no_push:
+            with open(PENDING_NOTIFY_PATH, "w", encoding="utf-8") as f:
+                json.dump(notify_payload, f, ensure_ascii=False, indent=2, default=_json_default)
+            logger.info("推送已缓存至 pending_notify.json，等待部署完成后发送")
 
         # Step 8：评估 Bark 通道健康（基于本次信号/日报发送结果）+ 推送健康告警
-        if not args.no_push:
+        # defer_push 模式下尚未真正发送，bark 健康状态由 --send-pending 阶段评估
+        if not args.no_push and not args.defer_push:
             bh = notifier.bark_healthy()
             if bh is True:
                 health.mark(state, "bark", "ok")

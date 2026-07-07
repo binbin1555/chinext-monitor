@@ -12,6 +12,8 @@ on:
 
 permissions:
   contents: write       # 允许 commit 回仓库
+  pages: write          # 允许通过 Actions 部署 GitHub Pages
+  id-token: write       # deploy-pages 鉴权要求
 
 # 串行化：多次触发（含 cron-job.org 与手动并发）排队执行，避免并发 push 冲突
 concurrency:
@@ -22,6 +24,9 @@ jobs:
   monitor:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout
@@ -53,7 +58,7 @@ jobs:
           if [ "$NO_PUSH" = "true" ]; then
             python src/main.py --no-push
           else
-            python src/main.py
+            python src/main.py --defer-push
           fi
 
       - name: Commit updated data
@@ -73,3 +78,22 @@ jobs:
             git pull --rebase --autostash origin main || { echo "rebase 失败"; exit 1; }
           done
           echo "push 多次失败"; exit 1
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Send pending Bark notifications
+        if: always() && github.event.inputs.no_push != 'true'
+        env:
+          BARK_KEY:      ${{ secrets.BARK_KEY }}
+          DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
+        run: python src/main.py --send-pending
