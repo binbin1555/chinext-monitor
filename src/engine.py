@@ -467,10 +467,13 @@ def calc_warnings(hist: pd.DataFrame, today_str: str, state: dict,
         if not ls["has_reduced"] and 0.75 <= fp < 0.80:
             warnings.append(f"⚠️ 浮盈{fp:.1%}，距减仓线(80%)还差{(0.80-fp)*100:.1f}%")
 
-    if pe_pct is not None and 0.78 <= pe_pct < 0.80:
-        warnings.append(f"⚠️ PE分位{pe_pct:.1%}，临近止盈观察期条件（80%）")
-    if pb_pct is not None and 0.78 <= pb_pct < 0.80:
-        warnings.append(f"⚠️ PB分位{pb_pct:.1%}，临近止盈观察期条件（80%）")
+    # 观察期一经进入永不取消（手册4.1），进入后不再提示"临近"——
+    # 否则分位从高位回落穿过 78~80% 区间时会误报（与 T 档预警查 t*_fired 同理）
+    if not state.get("observation_entered"):
+        if pe_pct is not None and 0.78 <= pe_pct < 0.80:
+            warnings.append(f"⚠️ PE分位{pe_pct:.1%}，临近止盈观察期条件（80%）")
+        if pb_pct is not None and 0.78 <= pb_pct < 0.80:
+            warnings.append(f"⚠️ PB分位{pb_pct:.1%}，临近止盈观察期条件（80%）")
 
     # MA120 掉头预警
     if state.get("armed") and close is not None and ma120 is not None:
