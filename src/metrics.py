@@ -419,17 +419,38 @@ def calc_gaps(hist: pd.DataFrame, today_str: str, state: dict,
         if state.get("armed") and ma120 is not None and close:
             from src.engine import count_exit_streak
             streak = count_exit_streak(hist, today_str)
-            if close < float(ma120):
+            # MA120 方向（与引擎清仓口径一致：当日 MA120 < 20 个交易日前的 MA120）
+            _sub = hist[hist["date"] <= today_str]
+            ma120_past = (float(_sub["ma120"].iloc[-21])
+                          if len(_sub) >= 21 and not pd.isna(_sub["ma120"].iloc[-21])
+                          else None)
+            ma_falling = ma120_past is not None and float(ma120) < ma120_past
+            below = close < float(ma120)
+            cond_txt = (f"①收盘<MA120：{'✓' if below else '✗'}（{close:.0f} / {ma120:.0f}）　"
+                        + (f"②MA120下行：{'✓' if ma_falling else '✗'}"
+                           f"（{ma120:.0f} vs 20日前 {ma120_past:.0f}）"
+                           if ma120_past is not None else "②MA120下行：数据不足"))
+            if below and ma_falling:
                 days_left = max(0, 3 - streak)
                 gaps.append({
                     "name": "全部清仓",
                     "big": f"{days_left} 天" if days_left > 0 else "已满足",
-                    "headline": (f"已跌破 MA120，现状再持续 {days_left} 天触发全部清仓"
+                    "headline": (f"两条件均满足，再持续 {days_left} 天触发全部清仓"
                                  if days_left > 0 else "已连续 3 日满足，可全部清仓"),
-                    "note": "计日已含 MA120 下行验证，系统自动判断",
-                    "current": f"已连续 {streak} 日满足 / 需 3 日",
+                    "note": cond_txt,
+                    "current": f"已连续 {streak} 日同时满足 / 需 3 日",
                     "progress": clamp01(streak / 3.0),
                     "tone": "warn",
+                })
+            elif below:
+                gaps.append({
+                    "name": "全部清仓",
+                    "big": "计日未启动",
+                    "headline": "已跌破 MA120，但 MA120 仍在上行——3 日计数尚未开始",
+                    "note": cond_txt + "　两条件同时满足的当日起才开始计数",
+                    "current": f"已连续 {streak} 日同时满足 / 需 3 日",
+                    "progress": clamp01(streak / 3.0),
+                    "tone": "down",
                 })
             else:
                 fall = (float(close) - float(ma120)) / float(close)
@@ -437,7 +458,7 @@ def calc_gaps(hist: pd.DataFrame, today_str: str, state: dict,
                     "name": "全部清仓",
                     "big": f"{fall*100:.1f}%",
                     "headline": f"点位再跌 {fall*100:.1f}%（跌破 MA120），准备全部清仓",
-                    "note": "跌破后系统自动计日，3 日达标（含 MA120 下行验证）则触发",
+                    "note": ("跌破后需 MA120 同时下行才开始 3 日计数　" + cond_txt),
                     "current": f"收盘 {close:.0f} / MA120 {ma120:.0f}",
                     "progress": clamp01(1 - fall),
                     "tone": "down",
