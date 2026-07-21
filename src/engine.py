@@ -325,6 +325,21 @@ class Engine:
                 self.state["armed"] = True
                 logger.info(f"{today_str} 已武装（浮盈{float_profit:.1%}）")
 
+            # 武装超时（手册4.3.1，休眠保险）：首笔买入起满 N 年仍未武装 →
+            # 视同武装。只解锁清仓三条件，本身不卖出；历史两轮武装用时
+            # 1.54/2.39 年，N=4 在 2016–2026 全样本零触发。
+            if not self.state.get("armed"):
+                buys = self.state.get("cycle_buys") or []
+                timeout_y = float(self.config.get("arming_timeout_years", 4))
+                if buys and timeout_y > 0:
+                    held_days = (datetime.strptime(today_str, "%Y-%m-%d")
+                                 - datetime.strptime(buys[0]["date"], "%Y-%m-%d")).days
+                    if held_days >= timeout_y * 365:
+                        self.state["armed"] = True
+                        self.state["timeout_armed"] = True
+                        logger.info(f"{today_str} 建仓{held_days/365:.2f}年未武装，"
+                                    f"超时视同武装（手册4.3.1）")
+
             # 进入止盈观察期
             if not self.state.get("observation_entered"):
                 cond1 = (pe_pct is not None and pe_pct >= 0.80 and float_profit >= 0.80)

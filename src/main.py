@@ -277,8 +277,8 @@ def main():
             # 复利滚入：新一轮每份金额=建仓首笔买入日的全部资金÷150，事前未知
             "fen_size": None,
             "t1_fired": False, "t2_fired": False, "t3_fired": False,
-            "rightside_used": False, "armed": False, "reduced": False,
-            "reduce_armed": False,
+            "rightside_used": False, "armed": False, "timeout_armed": False,
+            "reduced": False, "reduce_armed": False,
             "exited": False, "observation_entered": False, "exit_streak": 0,
             "cycle_buys": [], "cycle_sold_fen": 0, "cycle_sells": [],
             "last_weekly_week": None, "phase": "waiting",

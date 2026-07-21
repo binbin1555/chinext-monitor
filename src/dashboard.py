@@ -6,7 +6,7 @@ import json
 import logging
 import numpy as np
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -250,6 +250,8 @@ def generate_data_json(
             "actual_weighted_avg": round(ls["weighted_avg"], 2) if ls.get("weighted_avg") else None,
             "actual_float_profit": actual_fp,
             "armed":              state.get("armed", False),
+            "timeout_armed":      bool(state.get("timeout_armed")),
+            "arming_deadline":    _arming_deadline(state, config),
             "observation_entered": state.get("observation_entered", False),
             "exit_streak":        state.get("exit_streak", 0),
             "t1_fired":           state.get("t1_fired", False),
@@ -302,6 +304,16 @@ def _round4(v):
     return round(v, 4) if v is not None and not (isinstance(v, float) and np.isnan(v)) else None
 
 
+def _arming_deadline(state, config):
+    """武装超时日（手册4.3.1）：本轮首笔买入 + N 年。已武装或空仓时为 None。"""
+    buys = state.get("cycle_buys") or []
+    timeout_y = float(config.get("arming_timeout_years", 4))
+    if state.get("armed") or not buys or timeout_y <= 0:
+        return None
+    first = datetime.strptime(buys[0]["date"], "%Y-%m-%d")
+    return (first + timedelta(days=int(timeout_y * 365))).strftime("%Y-%m-%d")
+
+
 def _next_action_hint(state, ledger_state, today_row, config) -> str:
     if today_row is None:
         return "等待数据"
@@ -322,7 +334,11 @@ def _next_action_hint(state, ledger_state, today_row, config) -> str:
     if state.get("armed"):
         if state.get("exit_streak", 0) >= 1:
             return f"⚠️ 止盈条件满足中（已{state['exit_streak']}天/需3天）"
+        if state.get("timeout_armed"):
+            return "已武装（超时视同武装，4.3.1），关注MA120方向"
         return "已武装，关注MA120方向"
+    deadline = _arming_deadline(state, config)
+    suffix = f"（未武装，{deadline} 起超时视同武装）" if deadline else ""
     if fp is not None:
-        return f"持有中，浮盈{fp*100:.1f}%，关注估值与均线"
-    return "持有中，等待止盈条件"
+        return f"持有中，浮盈{fp*100:.1f}%，关注估值与均线{suffix}"
+    return f"持有中，等待止盈条件{suffix}"
