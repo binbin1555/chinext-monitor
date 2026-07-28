@@ -7,12 +7,13 @@ __pycache__/
 venv/
 env/
 
-# 本地原始数据导出（已合并进 history.csv，不提交）
+# 本地原始数据导出（已合并进 history.csv / dividend_history.csv，不提交）
 创业板指_*.csv
 创业板近10年均线_*.csv
 国债收益率.csv
 且慢app-*.txt
 创业板指_归属于*.csv
+中证红利_*.csv
 
 # 含密钥的本地文档（绝不提交）
 理杏仁API*.txt
@@ -20,10 +21,17 @@ env/
 
 # 搭建过程中的一次性脚本
 fill_*.py
+verify_lixinger.py
+验证数据.bat
+预览页面.bat
+result.txt
+样式预览.html
+预览-提醒.html
 
 # 本地文档（不需要进仓库）
 创业板大周期择时操作手册.md
 创业板监测系统_搭建手册Prompt.md
+CLAUDE.md
 
 # OS
 .DS_Store
@@ -35,3 +43,6 @@ desktop.ini
 
 # CI 内部交接文件：--defer-push 缓存待发送的 Bark 内容，--send-pending 读取后即删除
 pending_notify.json
+
+# 本地研究目录（策略回测等探索性工作，不进入生产仓库）
+research/

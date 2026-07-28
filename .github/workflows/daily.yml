@@ -61,11 +61,27 @@ jobs:
             python src/main.py --defer-push
           fi
 
+      # 中证红利 分批监测（独立模块，买 -4/-7/-10 + 涨回MA250 止盈）。
+      # 理杏仁 cp 为主 + 腾讯备援交叉校验；仅在触发买/卖档位时直接 Bark 推送，平时静默。
+      - name: Run dividend monitor (中证红利)
+        if: always()          # 独立于创业板监测：即便上面失败也照常判断红利
+        env:
+          LIXINGER_TOKEN: ${{ secrets.LIXINGER_TOKEN }}
+          BARK_KEY:       ${{ secrets.BARK_KEY }}
+          DASHBOARD_URL:  ${{ secrets.DASHBOARD_URL }}
+        run: |
+          NO_PUSH="${{ github.event.inputs.no_push }}"
+          if [ "$NO_PUSH" = "true" ]; then
+            python src/dividend.py --no-push
+          else
+            python src/dividend.py
+          fi
+
       - name: Commit updated data
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/history.csv state.json docs/data.json ledger.csv
+          git add data/history.csv state.json docs/data.json ledger.csv data/dividend_history.csv docs/dividend.json
           # 仅在有变更时提交
           if git diff --cached --quiet; then
             echo "无变更，跳过提交"; exit 0

@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>中证红利 · 择时监测</title>
+<script src="echarts.min.js"></script>
+<style>
+  :root{
+    --paper:#f3ece0;--card:#efe6d6;--ink:#33302a;--ink2:#6b5f4e;
+    --brown:#7a3b23;--brick:#a8432b;--line:rgba(122,59,35,.18);
+    --green:#1f7a3d;--red:#b0121a;
+    --serif:Georgia,'Times New Roman','Songti SC','STSong','SimSun',serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{--paper:#221d17;--card:#2c261e;--ink:#ece1cd;--ink2:#b6a488;
+      --brown:#d69b6e;--brick:#e08a5c;--line:rgba(214,155,110,.22);
+      --green:#3fae63;--red:#e2645f;}
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  html{background:var(--paper);color:var(--ink);font-family:var(--serif);-webkit-font-smoothing:antialiased;}
+  body{max-width:540px;margin:0 auto;padding:16px 15px 44px;min-height:100vh;}
+  h1{font-size:22px;font-weight:700;color:var(--brown);}
+  .sub{font-size:12px;color:var(--ink2);margin-top:5px;line-height:1.55;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:4px;padding:15px 16px;margin-top:14px;}
+  .ttl{font-size:13px;font-weight:700;color:var(--brown);letter-spacing:.03em;margin-bottom:10px;
+       border-bottom:1.5px solid var(--brown);padding-bottom:6px;display:inline-block;}
+
+  #reminder{position:sticky;top:8px;z-index:30;border-radius:6px;padding:14px 15px;margin:12px 0 4px;
+            box-shadow:0 6px 20px rgba(0,0,0,.22);animation:breathe 1.8s ease-in-out infinite;color:#fff8ef;}
+  #reminder.buy{background:var(--green);}
+  #reminder.sell{background:var(--red);}
+  #reminder .rk{font-size:19px;font-weight:800;display:flex;align-items:center;gap:8px;}
+  #reminder .rt{font-size:13.5px;margin:5px 0 11px;line-height:1.5;opacity:.96;}
+  #reminder button{background:#fff8ef;color:#222;border:none;border-radius:5px;padding:10px 14px;
+                   font-size:14.5px;font-weight:700;width:100%;cursor:pointer;font-family:inherit;}
+  #reminder button:active{transform:scale(.98);}
+  @keyframes breathe{0%,100%{opacity:1;}50%{opacity:.86;}}
+
+  .hero{background:var(--card);border:1.5px solid var(--brown);border-radius:4px;padding:17px 18px 16px;margin-top:14px;}
+  .hero .lab{font-size:12px;letter-spacing:.16em;color:var(--ink2);}
+  .hero .act{font-size:33px;font-weight:800;color:var(--brick);margin:5px 0 4px;line-height:1.1;}
+  .hero .sub2{font-size:15px;color:var(--ink);font-weight:600;}
+  .hero .plain{font-size:12.5px;color:var(--ink2);margin-top:9px;line-height:1.55;border-top:1px dashed var(--line);padding-top:9px;}
+  .hero .two{display:flex;flex-direction:column;gap:11px;}
+  .hero .two .ln{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;}
+  .hero .two .big{font-size:21px;font-weight:800;color:var(--brick);white-space:nowrap;}
+  .hero .two .tx{font-size:13px;color:var(--ink);}
+  .hero.done .act{color:var(--green);font-size:24px;}
+
+  .setrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .setrow label{font-size:13px;color:var(--ink);white-space:nowrap;}
+  .setrow input{flex:1;min-width:120px;font-family:inherit;font-size:15px;padding:8px 10px;
+                border:1px solid var(--brown);border-radius:4px;background:var(--paper);color:var(--ink);}
+  .setrow button{font-family:inherit;font-size:13.5px;font-weight:700;padding:8px 14px;
+                 background:var(--brown);color:var(--paper);border:none;border-radius:4px;cursor:pointer;}
+  .setrow button.ghost{background:transparent;color:var(--ink2);border:1px solid var(--line);}
+  .setbox{margin-top:18px;font-size:12px;color:var(--ink2);text-align:center;line-height:1.6;}
+  .setbox b{color:var(--brick);font-weight:700;}
+  .setbox a{color:var(--brick);cursor:pointer;text-decoration:underline;text-underline-offset:2px;}
+
+  .stats{display:flex;gap:9px;}
+  .stat{flex:1;text-align:center;}
+  .stat .k{font-size:11px;color:var(--ink2);}
+  .stat .v{font-size:19px;font-weight:700;color:var(--brown);margin:3px 0 1px;}
+  .stat .kk{font-size:10.5px;color:var(--ink2);opacity:.85;}
+  .stat.profit.pos .v,.stat.profit.pos .kk{color:var(--brick);}
+  .stat.profit.neg .v,.stat.profit.neg .kk{color:var(--green);}
+  .note{font-size:12px;color:var(--ink2);line-height:1.6;margin-top:12px;border-top:1px dashed var(--line);padding-top:10px;}
+  .note b{color:var(--brick);}
+
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:right;padding:8px 3px;border-bottom:1px solid var(--line);}
+  th:first-child,td:first-child{text-align:left;}
+  th{color:var(--ink2);font-weight:600;font-size:11px;}
+  td{font-variant-numeric:tabular-nums;}
+  .tag{display:inline-block;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:700;}
+  .tag.on{background:var(--brown);color:var(--paper);}
+  .tag.off{background:transparent;border:1px solid var(--ink2);color:var(--ink2);}
+  .tag.warn{background:#c77a2a;color:#fff8ef;}
+  #chart svg{width:100%;height:auto;display:block;}
+  .foot{font-size:11px;color:var(--ink2);opacity:.85;margin-top:16px;line-height:1.6;text-align:center;}
+</style>
+</head>
+<body>
+  <div id="reminder" style="display:none"></div>
+  <h1>中证红利 · 择时监测</h1>
+  <div class="sub" id="strategy">加载中…</div>
+
+  <section class="hero" id="hero"></section>
+
+  <section class="card">
+    <div class="stats" id="stats"></div>
+    <p class="note" id="statnote"></p>
+  </section>
+
+  <section class="card">
+    <div class="ttl">三档买入线（价格跌到就买 1/3 仓）</div>
+    <table id="buytab"><thead><tr><th>档位</th><th>触发点位</th><th>距现价</th><th>买入金额</th><th>状态</th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <section class="card">
+    <div class="ttl">价格 · 年线 · 买入区间（近一年）</div>
+    <div id="chart"></div>
+    <div class="foot" style="margin-top:8px;text-align:left">红实线＝收盘点位　·　棕虚线＝年线(MA250)　·　浅带＝买入区(年线下4~10%)</div>
+  </section>
+
+  <section class="card" id="holdcard">
+    <div class="ttl">当前持仓明细</div>
+    <table id="holdtab"><thead><tr><th>建仓日</th><th>档位</th><th>买入点位</th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <div class="setbox" id="setbox"></div>
+  <div class="foot" id="foot">—</div>
+
+<script>
+const DEFAULT={"data_date":"2026-07-24","close":5404.3,"ma250":5594.5,"disc_pct":-3.4,"held":3,"filled_list":[true,true,true],"avg_cost":5176.4,"unreal_ret_pct":4.4,"sell_line":5594.5,"to_sell_pct":3.52,"next_buy_tranche":null,"next_buy_line":null,"to_next_buy_pct":null,"buy_lines":[{"tranche":1,"pct":4,"level":5370.8,"filled":true},{"tranche":2,"pct":7,"level":5202.9,"filled":true},{"tranche":3,"pct":10,"level":5035.1,"filled":true}],"entries":[{"date":"2026-06-18","tranche":0,"price":5316.7},{"date":"2026-06-25","tranche":1,"price":5198.5},{"date":"2026-06-30","tranche":2,"price":5022.5}],"recent_actions":[{"id":"2026-06-18-buy-t0","date":"2026-06-18","kind":"buy","close":5316.7,"tranche":0},{"id":"2026-06-25-buy-t1","date":"2026-06-25","kind":"buy","close":5198.5,"tranche":1},{"id":"2026-06-30-buy-t2","date":"2026-06-30","kind":"buy","close":5022.5,"tranche":2}],"last_action":{"id":"2026-06-30-buy-t2","date":"2026-06-30","kind":"buy","close":5022.5,"tranche":2},"round_id":"2026-06-18","updated":"2026-07-28 00:00 UTC","source":"seed","series":[{"d":"2025-07-01","c":5454.3,"m":5327.3},{"d":"2025-07-23","c":5647.1,"m":5338.5},{"d":"2025-08-14","c":5540.1,"m":5366.2},{"d":"2025-09-05","c":5510.0,"m":5398.2},{"d":"2025-09-29","c":5474.4,"m":5438.8},{"d":"2025-10-29","c":5653.8,"m":5457.2},{"d":"2025-11-20","c":5656.0,"m":5476.1},{"d":"2025-12-12","c":5426.7,"m":5484.3},{"d":"2026-01-07","c":5592.9,"m":5481.5},{"d":"2026-01-29","c":5757.6,"m":5493.6},{"d":"2026-03-02","c":5905.2,"m":5518.9},{"d":"2026-03-24","c":5712.8,"m":5553.2},{"d":"2026-04-16","c":5734.5,"m":5569.9},{"d":"2026-05-13","c":5748.1,"m":5598.4},{"d":"2026-06-04","c":5681.5,"m":5610.0},{"d":"2026-06-29","c":5120.7,"m":5609.3},{"d":"2026-07-21","c":5391.1,"m":5596.0},{"d":"2026-07-24","c":5404.3,"m":5594.5}]};
+const $=id=>document.getElementById(id);
+const f1=x=>x==null?'—':Number(x).toLocaleString('en-US',{minimumFractionDigits:1,maximumFractionDigits:1});
+const money=x=>'¥'+Math.round(x).toLocaleString('en-US');
+const TLAB=['−4%','−7%','−10%'];
+let CUR=DEFAULT;
+
+const getConf=()=>{try{return new Set(JSON.parse(localStorage.getItem('dvd_confirmed')||'[]'))}catch(e){return new Set()}};
+const setConf=s=>localStorage.setItem('dvd_confirmed',JSON.stringify([...s]));
+const getCap=()=>{const v=parseFloat(localStorage.getItem('dvd_capital'));return isFinite(v)&&v>0?v:0;};
+
+function confirmAction(id){const s=getConf();s.add(id);setConf(s);render(CUR);}
+let settingsOpen=false;
+function toggleSet(){settingsOpen=!settingsOpen;render(CUR);}
+function saveCap(){const el=$('capIn');if(el){const v=parseFloat(el.value);if(isFinite(v)&&v>0)localStorage.setItem('dvd_capital',v);}settingsOpen=false;render(CUR);}
+function renderSettings(cap){
+  const box=$('setbox');
+  if(settingsOpen){
+    box.innerHTML='<div class="setrow"><label>本轮初始资金 ¥</label>'+
+      '<input id="capIn" type="number" inputmode="numeric" placeholder="例如 100000" step="1000" min="0" value="'+(cap||'')+'">'+
+      '<button onclick="saveCap()">保存</button><button class="ghost" onclick="toggleSet()">取消</button></div>';
+    const e=$('capIn');if(e)e.focus();
+  }else if(cap){
+    box.innerHTML='本轮初始资金 <b>'+money(cap)+'</b> · 每档约 <b>'+money(cap/3)+'</b>　<a onclick="toggleSet()">修改</a>';
+  }else{
+    box.innerHTML='<a onclick="toggleSet()">设置本轮初始资金</a>，即可显示每档买多少钱、当前浮盈多少钱';
+  }
+}
+
+function init(D){
+  CUR=D;
+  const hash=location.hash;                        // 预览用：#demo-sell / #demo-buy 强制显示提醒
+  if(hash==='#demo-sell'){D.last_action={id:'demo-sell',date:D.data_date,kind:'sell',close:D.ma250,ret_pct:9.6,n:3};}
+  else if(hash==='#demo-buy'){D.last_action={id:'demo-buy',date:D.data_date,kind:'buy',close:D.next_buy_line||D.close,tranche:0};}
+  else if(!localStorage.getItem('dvd_seeded')){    // 首次访问：把当前已知操作视为"已知"，避免旧持仓误报提醒
+    setConf(new Set((D.recent_actions||[]).map(a=>a.id)));localStorage.setItem('dvd_seeded','1');
+  }
+  render(D);
+}
+
+function render(D){
+  const cap=getCap();
+  const la=D.last_action;
+  const pendingSell = la && la.kind==='sell' && !getConf().has(la.id);
+
+  renderReminder(D,cap);
+  $('strategy').textContent='跌破年线 −4%/−7%/−10% 各买 1/3　·　涨回年线全部卖出　·　数据日 '+D.data_date;
+
+  // ── 顶部操作卡 ──
+  const hero=$('hero');hero.className='hero';
+  if(pendingSell){
+    hero.classList.add('done');
+    hero.innerHTML='<div class="lab">本轮状态</div><div class="act">✔ 本轮止盈达成 +'+f1(la.ret_pct)+'%</div>'+
+      '<div class="sub2">请先点击上方红色提醒里的「确认」</div>'+
+      '<div class="plain">确认你已完成卖出后，系统自动开启下一轮监测（下一轮从"跌破年线−4%"重新开始建仓）。</div>';
+  }else if(D.held>=3){
+    hero.innerHTML='<div class="lab">下一步操作</div><div class="act">再涨 '+f1(D.to_sell_pct)+'%</div>'+
+      '<div class="sub2">→ 触发止盈，全部卖出</div>'+
+      '<div class="plain">现价 '+f1(D.close)+'，涨回年线 '+f1(D.sell_line)+'（MA250）即触发。已满仓 3/3，只等这一步。</div>';
+  }else if(D.held<=0){
+    hero.innerHTML='<div class="lab">下一步操作</div><div class="act">再跌 '+f1(Math.abs(D.to_next_buy_pct))+'%</div>'+
+      '<div class="sub2">→ 触发买入第1档，先建 1/3 仓</div>'+
+      '<div class="plain">现价 '+f1(D.close)+'，跌到 '+f1(D.next_buy_line)+'（年线下 4%）即触发。当前空仓等待。</div>';
+  }else{
+    const nb=(D.next_buy_tranche||0)+1;
+    hero.innerHTML='<div class="lab">下一步操作</div><div class="two">'+
+      '<div class="ln"><span class="big">再跌 '+f1(Math.abs(D.to_next_buy_pct))+'%</span><span class="tx">→ 加仓第'+nb+'档（再买 1/3，跌到 '+f1(D.next_buy_line)+'）</span></div>'+
+      '<div class="ln"><span class="big">再涨 '+f1(D.to_sell_pct)+'%</span><span class="tx">→ 止盈清仓（涨回年线 '+f1(D.sell_line)+'）</span></div>'+
+      '</div><div class="plain">已持 '+D.held+'/3 仓。跌了就加下一档，涨回年线就全卖，看哪个先到。</div>';
+  }
+
+  renderSettings(cap);
+
+  // ── 三个数值：收盘点位 / 年线 / 当前浮盈 ──
+  let profitV,profitSub,profitCls='';
+  if(D.held>0){
+    const r=D.unreal_ret_pct;
+    profitV=(r>=0?'+':'')+f1(r)+'%';
+    profitCls=r>=0?'pos':'neg';                 // 红涨绿跌：盈红、亏绿
+    if(cap){const amt=cap*(D.held/3)*(r/100);profitSub='约 '+(amt>=0?'+':'−')+money(Math.abs(amt));}
+    else profitSub='设资金后显示金额';
+  }else{profitV='—';profitSub='本轮空仓';}
+  $('stats').innerHTML=
+    tile('当前浮盈',profitV,profitSub,'profit '+profitCls)+
+    tile('收盘点位',f1(D.close),'中证红利指数','')+
+    tile('年线 MA250',f1(D.ma250),'近250日均价','');
+  $('statnote').innerHTML='「收盘点位」＝当日中证红利指数收盘。「年线」＝近250日均价，<b>每天重新计算</b>。'+
+    '「当前浮盈」＝手里这些仓现在赚/亏多少（价格口径，不含分红，实际略高）。';
+
+  // ── 买入线表（含金额）──
+  $('buytab').querySelector('tbody').innerHTML=D.buy_lines.map(b=>{
+    const gap=(b.level/D.close-1)*100;
+    const amt=cap?money(cap/3):'—';
+    return '<tr><td>第'+b.tranche+'档 '+TLAB[b.tranche-1]+'</td><td>'+f1(b.level)+'</td><td>'+
+      (gap>0?'+':'')+f1(gap)+'%</td><td>'+amt+'</td><td>'+statusTag(D,b.tranche-1)+'</td></tr>';
+  }).join('');
+
+  // ── 持仓明细 ──
+  if(D.entries&&D.entries.length){
+    $('holdcard').style.display='';
+    $('holdtab').querySelector('tbody').innerHTML=D.entries.map(e=>
+      '<tr><td>'+e.date+'</td><td>'+TLAB[e.tranche]+'</td><td>'+f1(e.price)+'</td></tr>').join('');
+  }else{$('holdcard').style.display='none';}
+
+  $('foot').innerHTML='更新 '+D.updated+'　·　数据源 '+D.source+'<br>纸面监测 / 机械规则，非交易建议；确认状态与资金存在本设备浏览器里。';
+  drawChart(D.series||[]);
+}
+
+function tile(k,v,kk,cls){return '<div class="stat '+cls+'"><div class="k">'+k+'</div><div class="v">'+v+'</div><div class="kk">'+kk+'</div></div>';}
+
+function statusTag(D,i){
+  if(!(D.buy_lines[i]&&D.buy_lines[i].filled))return '<span class="tag off">待触发</span>';
+  const e=(D.entries||[]).find(x=>x.tranche===i);
+  const id=e?(e.date+'-buy-t'+i):null;
+  if(id&&!getConf().has(id))return '<span class="tag warn">待确认</span>';   // 触发但未确认
+  return '<span class="tag on">已买</span>';
+}
+
+function renderReminder(D,cap){
+  const el=$('reminder');const la=D.last_action;
+  if(!la||getConf().has(la.id)){el.style.display='none';return;}
+  el.style.display='block';
+  if(la.kind==='buy'){
+    el.className='buy';
+    const amt=cap?('，买入约 '+money(cap/3)):'';
+    el.innerHTML='<div class="rk">🟢 该买入了！</div>'+
+      '<div class="rt">第'+(la.tranche+1)+'档（'+TLAB[la.tranche]+'）已触发，价格 '+f1(la.close)+amt+'（本档 1/3 仓）</div>'+
+      '<button onclick="confirmAction(\''+la.id+'\')">✓ 我已完成买入，点此确认</button>';
+  }else{
+    el.className='sell';
+    const rz=cap?('，实现约 '+money(cap*((la.n||3)/3)*(la.ret_pct/100))):'';
+    el.innerHTML='<div class="rk">🔴 该止盈了！全部卖出</div>'+
+      '<div class="rt">价格涨回年线，触发清仓。本轮价格口径 +'+f1(la.ret_pct)+'%'+rz+'。卖完后点确认，系统开启下一轮。</div>'+
+      '<button onclick="confirmAction(\''+la.id+'\')">✓ 我已完成卖出，点此确认并开启下一轮</button>';
+  }
+}
+
+let CHART=null;
+function drawChart(sp){
+  if(!sp.length)return;
+  if(typeof echarts==='undefined'){drawSimpleSVG(sp);return;}   // 内嵌预览无 echarts 时降级
+  const el=$('chart');el.style.height='240px';
+  const css=getComputedStyle(document.documentElement);
+  const brick=css.getPropertyValue('--brick').trim(),brown=css.getPropertyValue('--brown').trim(),
+        ink2=css.getPropertyValue('--ink2').trim(),card=css.getPropertyValue('--card').trim(),
+        ink=css.getPropertyValue('--ink').trim(),brownc=css.getPropertyValue('--brown').trim();
+  const dates=sp.map(p=>p.d),close=sp.map(p=>p.c),ma=sp.map(p=>p.m);
+  const base=sp.map(p=>+(p.m*0.90).toFixed(1)),band=sp.map(p=>+((p.m*0.96)-(p.m*0.90)).toFixed(1));
+  const n=dates.length,iv=Math.max(0,Math.floor(n/6));
+  if(!CHART)CHART=echarts.init(el);
+  CHART.setOption({
+    grid:{left:4,right:10,top:24,bottom:2,containLabel:true},
+    legend:{data:['价格','年线MA250'],top:0,textStyle:{color:ink2,fontSize:11},itemGap:16,itemWidth:18,itemHeight:8},
+    tooltip:{trigger:'axis',axisPointer:{type:'line',lineStyle:{color:ink2,width:1}},
+      backgroundColor:card,borderColor:brownc,borderWidth:1,textStyle:{color:ink,fontSize:12},
+      formatter:function(ps){var i=ps[0].dataIndex;
+        return '<b>'+dates[i]+'</b><br>收盘点位 '+Math.round(close[i])+'<br>年线 MA250 '+Math.round(ma[i])+
+          '<br>买入区 '+Math.round(ma[i]*0.96)+' ~ '+Math.round(ma[i]*0.90)+
+          '<br>现相对年线 '+((close[i]/ma[i]-1)*100).toFixed(1)+'%';}},
+    xAxis:{type:'category',data:dates,boundaryGap:false,
+      axisLabel:{color:ink2,fontSize:10,interval:iv,formatter:v=>v.slice(2,7)},
+      axisLine:{lineStyle:{color:'rgba(128,128,128,.35)'}},axisTick:{show:false}},
+    yAxis:{type:'value',scale:true,axisLabel:{color:ink2,fontSize:10,formatter:v=>Math.round(v)},
+      splitLine:{lineStyle:{color:'rgba(128,128,128,.16)'}}},
+    series:[
+      {name:'_base',type:'line',data:base,stack:'z',symbol:'none',lineStyle:{opacity:0},silent:true,z:1},
+      {name:'买入区',type:'line',data:band,stack:'z',symbol:'none',lineStyle:{opacity:0},
+        areaStyle:{color:brick,opacity:0.10},silent:true,z:1},
+      {name:'年线MA250',type:'line',data:ma,symbol:'none',lineStyle:{width:1.3,color:brown,type:'dashed'},z:3},
+      {name:'价格',type:'line',data:close,symbol:'none',lineStyle:{width:2.2,color:brick},z:4}
+    ]
+  },true);
+  if(!drawChart._rs){drawChart._rs=1;addEventListener('resize',()=>CHART&&CHART.resize());}
+}
+function drawSimpleSVG(sp){
+  const css=getComputedStyle(document.documentElement);
+  const brick=css.getPropertyValue('--brick').trim(),brown=css.getPropertyValue('--brown').trim();
+  const W=560,H=190,pL=6,pR=6,pT=10,pB=16;
+  const c=sp.map(p=>p.c),m=sp.map(p=>p.m),b4=sp.map(p=>p.m*0.96),b10=sp.map(p=>p.m*0.90);
+  let lo=Math.min(...b10),hi=Math.max(...c.concat(m));const pd=(hi-lo)*0.08;lo-=pd;hi+=pd;
+  const n=sp.length,xw=(W-pL-pR)/(n-1);
+  const X=i=>pL+i*xw,Y=v=>pT+(H-pT-pB)*(1-(v-lo)/(hi-lo));
+  const path=a=>a.map((v,i)=>(i?'L':'M')+X(i).toFixed(1)+' '+Y(v).toFixed(1)).join(' ');
+  let band='M'+X(0)+' '+Y(b4[0]).toFixed(1);
+  for(let i=1;i<n;i++)band+=' L'+X(i).toFixed(1)+' '+Y(b4[i]).toFixed(1);
+  for(let i=n-1;i>=0;i--)band+=' L'+X(i).toFixed(1)+' '+Y(b10[i]).toFixed(1);
+  band+=' Z';
+  $('chart').innerHTML='<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" style="height:190px">'+
+    '<path d="'+band+'" fill="'+brick+'" opacity="0.10"/>'+
+    '<path d="'+path(m)+'" fill="none" stroke="'+brown+'" stroke-width="1.3" stroke-dasharray="4 3" opacity="0.9"/>'+
+    '<path d="'+path(c)+'" fill="none" stroke="'+brick+'" stroke-width="2.2"/></svg>';
+}
+
+fetch('dividend.json?t='+Date.now()).then(r=>r.json()).then(init).catch(()=>init(DEFAULT));
+</script>
+</body>
+</html>
