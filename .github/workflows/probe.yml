@@ -1,0 +1,55 @@
+name: 数据源可得性探针（手动）
+
+# 只读探针：在 GitHub Actions 的网络环境里测试各数据源是否可达。
+# 不写盘、不提交、不推送、不发 Bark，不触碰创业板与红利的任何业务逻辑。
+# 用途：本地被墙的源（东财/集思录/沪深交易所/中证官网）在 CI 里是否可用，
+#       决定《红利热度方法论》六维度模型能做完整版还是简版。
+on:
+  workflow_dispatch:
+    inputs:
+      skip_akshare:
+        description: "跳过 akshare 探针（更快，只测 HTTP）"
+        default: "false"
+        required: false
+
+permissions:
+  contents: read          # 只读：本 workflow 不提交任何东西
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install requests
+          if [ "${{ github.event.inputs.skip_akshare }}" != "true" ]; then
+            pip install akshare || echo "akshare 安装失败，将跳过该组探针"
+          fi
+
+      - name: Run probe
+        env:
+          LIXINGER_TOKEN: ${{ secrets.LIXINGER_TOKEN }}
+        run: |
+          if [ "${{ github.event.inputs.skip_akshare }}" = "true" ]; then
+            python scripts/probe_sources.py --http --json probe_result.json
+          else
+            python scripts/probe_sources.py --json probe_result.json
+          fi
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-result
+          path: probe_result.json
+          retention-days: 30
