@@ -1,0 +1,52 @@
+name: 哨兵历史检验（手动，一次性）
+
+# 只读：从理杏仁拉取中证红利 000922 的长历史估值，重建"隐含盈利 E"序列，
+# 检验 2010-01→2014-06 那次 −38.6% 下跌期间，哨兵会不会报警。
+# 若那段是估值杀（E 未下滑）→ 哨兵对最关键场景无效 → 放弃或改设计。
+# 不写业务数据、不提交、不推送、不发 Bark，不触碰创业板与红利的任何逻辑。
+on:
+  workflow_dispatch:
+    inputs:
+      probe_only:
+        description: "只探测数据能回溯到哪一年，不拉全量（快）"
+        default: "false"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  sentinel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests pandas
+
+      - name: Run sentinel history test
+        env:
+          LIXINGER_TOKEN: ${{ secrets.LIXINGER_TOKEN }}
+        run: |
+          if [ "${{ github.event.inputs.probe_only }}" = "true" ]; then
+            python scripts/sentinel_history.py --probe-only
+          else
+            python scripts/sentinel_history.py --csv sentinel_history.csv
+          fi
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentinel-history
+          path: sentinel_history.csv
+          retention-days: 30
+          if-no-files-found: ignore
