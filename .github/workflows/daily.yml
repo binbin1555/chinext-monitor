@@ -87,11 +87,28 @@ jobs:
             echo "无变更，跳过提交"; exit 0
           fi
           git commit -m "chore: 自动更新监测数据 $(date -u '+%Y-%m-%d %H:%M UTC')"
-          # 推送：与用户回填 ledger 等并发提交冲突时，rebase 后重试，避免数据丢失
+          # 推送：远端若已前进（他人/其他 run 的并发提交），rebase 后重试。
+          # 冲突按文件类型自动定解，避免留下冲突标记污染后续步骤：
+          #   派生文件（引擎每次确定性重算）→ 取本 run 最新版本
+          #   用户文件（手机回填 ledger/确认）→ 保留远端版本，绝不覆盖
+          GEN_FILES="state.json docs/data.json docs/dividend.json data/history.csv data/dividend_history.csv"
+          USER_FILES="ledger.csv acknowledged.json"
           for i in 1 2 3 4 5; do
             if git push; then echo "push 成功"; exit 0; fi
-            echo "push 被拒（第 $i 次），rebase 后重试…"
-            git pull --rebase --autostash origin main || { echo "rebase 失败"; exit 1; }
+            echo "push 被拒（第 $i 次），同步远端并按文件类型自动定解…"
+            git fetch origin main || { echo "fetch 失败"; exit 1; }
+            if git rebase origin/main; then
+              continue   # 无冲突，回到循环顶部重试 push
+            fi
+            # rebase 冲突：注意 rebase 语义下 --theirs=本 run 提交，--ours=远端
+            for f in $GEN_FILES;  do git checkout --theirs -- "$f" 2>/dev/null || true; done
+            for f in $USER_FILES; do git checkout --ours   -- "$f" 2>/dev/null || true; done
+            git add -A
+            # 若仍有未预期的未合并文件，安全中止（不留冲突标记）
+            if git diff --name-only --diff-filter=U | grep -q .; then
+              echo "存在未预期冲突文件，安全中止"; git rebase --abort; exit 1
+            fi
+            GIT_EDITOR=true git rebase --continue || { echo "rebase --continue 失败"; git rebase --abort; exit 1; }
           done
           echo "push 多次失败"; exit 1
 
