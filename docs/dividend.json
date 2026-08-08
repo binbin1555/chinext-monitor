@@ -1,6 +1,6 @@
 {
   "strategy": "买 跌破MA250 −4%/−7%/−10% 各1/3 · 卖 涨回MA250清仓（全价格口径）",
-  "updated": "2026-08-07 13:15 UTC",
+  "updated": "2026-08-08 13:15 UTC",
   "data_date": "2026-08-07",
   "source": "lixinger",
   "crosscheck": "双源交叉校验 90 天, 最大差 0.00 点",
