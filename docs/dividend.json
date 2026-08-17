@@ -1,12 +1,12 @@
 {
   "strategy": "买 跌破MA250 −4%/−7%/−10% 各1/3 · 卖 涨回MA250清仓（全价格口径）",
-  "updated": "2026-08-16 13:15 UTC",
-  "data_date": "2026-08-14",
+  "updated": "2026-08-17 13:15 UTC",
+  "data_date": "2026-08-17",
   "source": "lixinger",
   "crosscheck": "双源交叉校验 90 天, 最大差 0.00 点",
-  "close": 5478.4,
-  "ma250": 5591.2,
-  "disc_pct": -2.02,
+  "close": 5500.1,
+  "ma250": 5590.9,
+  "disc_pct": -1.63,
   "held": 3,
   "filled_list": [
     true,
@@ -14,9 +14,9 @@
     true
   ],
   "avg_cost": 5176.4,
-  "unreal_ret_pct": 5.83,
-  "sell_line": 5591.2,
-  "to_sell_pct": 2.06,
+  "unreal_ret_pct": 6.25,
+  "sell_line": 5590.9,
+  "to_sell_pct": 1.65,
   "next_buy_tranche": null,
   "next_buy_line": null,
   "to_next_buy_pct": null,
@@ -24,19 +24,19 @@
     {
       "tranche": 1,
       "pct": 4,
-      "level": 5367.5,
+      "level": 5367.3,
       "filled": true
     },
     {
       "tranche": 2,
       "pct": 7,
-      "level": 5199.8,
+      "level": 5199.6,
       "filled": true
     },
     {
       "tranche": 3,
       "pct": 10,
-      "level": 5032.1,
+      "level": 5031.8,
       "filled": true
     }
   ],
@@ -141,11 +141,6 @@
   },
   "round_id": "2026-06-18",
   "series": [
-    {
-      "d": "2025-07-22",
-      "c": 5667.6,
-      "m": 5337.1
-    },
     {
       "d": "2025-07-23",
       "c": 5647.1,
@@ -1440,6 +1435,11 @@
       "d": "2026-08-14",
       "c": 5478.4,
       "m": 5591.2
+    },
+    {
+      "d": "2026-08-17",
+      "c": 5500.1,
+      "m": 5590.9
     }
   ],
   "last_action_date": "2026-06-30",
