@@ -64,7 +64,10 @@ jobs:
       # 中证红利 分批监测（独立模块，买 -4/-7/-10 + 涨回MA250 止盈）。
       # 理杏仁 cp 为主 + 腾讯备援交叉校验；仅在触发买/卖档位时直接 Bark 推送，平时静默。
       - name: Run dividend monitor (中证红利)
-        if: always()          # 独立于创业板监测：即便上面失败也照常判断红利
+        # 【已暂停 2026-08-19】用户要求完全停掉红利模块：不抓数、不计算、不推送。
+        # 恢复方法：把下面的 if 改回  if: always()
+        # （always() 的含义：独立于创业板监测，即便上面失败也照常判断红利）
+        if: false
         env:
           LIXINGER_TOKEN: ${{ secrets.LIXINGER_TOKEN }}
           BARK_KEY:       ${{ secrets.BARK_KEY }}
