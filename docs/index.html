@@ -949,8 +949,18 @@
   </div><!-- /tab-content -->
 </div><!-- /ledger-panel -->
 
-<!-- ECharts 本地（避免 CDN 拖慢加载，echarts.min.js 与 index.html 同目录）-->
-<script src="echarts.min.js"></script>
+<!-- ECharts 本地异步加载：该文件 1MB，同步加载会阻塞首屏（手机上表现为"长时间白屏/卡死"）。
+     改为异步 + ready Promise：KPI 数字立即渲染，图表待库就绪后再补上；库失败也不影响数字。-->
+<script>
+window.ECHARTS_READY = new Promise(function(resolve){
+  var s = document.createElement('script');
+  s.src = 'echarts.min.js';
+  s.async = true;
+  s.onload  = function(){ resolve(true);  };
+  s.onerror = function(){ resolve(false); };   // 失败也 resolve，保证页面其余部分正常
+  document.head.appendChild(s);
+});
+</script>
 <script>
 // ═══════════════════════════════════════════════════════════
 // 全局配色
@@ -2643,6 +2653,52 @@ function showToast(msg) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// 图表延迟渲染：滚动到可视区才构建，避免首屏被 1MB 图表库拖慢
+// ═══════════════════════════════════════════════════════════
+function initChartsWhenVisible(data) {
+  const host = document.getElementById('chart-price');
+  if (!host) return;
+  let built = false;
+  let io = null, timer = null;
+
+  function cleanup() {
+    if (io)    { try { io.disconnect(); } catch(e){} io = null; }
+    if (timer) { clearTimeout(timer); timer = null; }
+    window.removeEventListener('scroll', onScroll);
+  }
+  async function build() {
+    if (built) return;
+    built = true;
+    cleanup();
+    const ok = await window.ECHARTS_READY;
+    if (!ok || typeof echarts === 'undefined') {
+      host.innerHTML = '<div style="padding:28px;text-align:center;color:#8a8a8e;font-size:13px">'
+                     + '图表库加载失败（不影响上方数据与信号）</div>';
+      return;
+    }
+    const c1 = renderChartPrice(data);
+    const c2 = renderChartNav(data);
+    const c3 = renderChartVal(data);
+    const c4 = renderChartTemp(data);
+    connectCharts(c1, c2, c3, c4);
+  }
+  function onScroll() { build(); }
+
+  // 三重保险，确保图表一定渲染（只是把时机推到首屏之后，不阻塞数字）：
+  // ① 滚动到可视区（最优：没看就不渲染，省电省内存）
+  if ('IntersectionObserver' in window) {
+    io = new IntersectionObserver((entries) => {
+      entries.forEach((e) => { if (e.isIntersecting) build(); });
+    }, { rootMargin: '300px' });
+    io.observe(host);
+  }
+  // ② 用户一滚动就渲染（兜住 IO 初始回调不触发的浏览器/环境）
+  window.addEventListener('scroll', onScroll, { passive: true, once: true });
+  // ③ 硬兜底：2 秒后无论如何都渲染（此时首屏数字早已显示，不影响体验）
+  timer = setTimeout(build, 2000);
+}
+
+// ═══════════════════════════════════════════════════════════
 // 主入口
 // ═══════════════════════════════════════════════════════════
 (async function() {
@@ -2657,11 +2713,7 @@ function showToast(msg) {
     renderDataFreshness(DATA);
     checkStaleAndRetry(DATA);
     renderHealthBanner(DATA);
-    const c1 = renderChartPrice(DATA);
-    const c2 = renderChartNav(DATA);
-    const c3 = renderChartVal(DATA);
-    const c4 = renderChartTemp(DATA);
-    connectCharts(c1, c2, c3, c4);
+    initChartsWhenVisible(DATA);
 
     // 初始化成交面板
     LM.setCommitted(DATA.committed_ledger || []);
