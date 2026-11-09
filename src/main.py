@@ -30,7 +30,8 @@ for _s in (sys.stdout, sys.stderr):
 import yaml
 from src.fetch    import update_history
 from src.engine   import (Engine, recalc_from_ledger, calc_warnings,
-                           theoretical_position, bootstrap_cycle_from_history)
+                           theoretical_position, bootstrap_cycle_from_history,
+                           ensure_ma250, start_new_cycle)
 from src.metrics  import (build_nav_series, calc_performance, calc_gaps,
                            build_theoretical_ledger, calc_asset_totals,
                            calc_fundamental_sentinel)
@@ -198,6 +199,7 @@ def main():
     if len(hist) == 0:
         logger.error("历史数据为空，退出")
         return
+    ensure_ma250(hist)   # 年线（牛市段卖出/买回线），history.csv 不存，每次现算
 
     # ── Step 2：判断是否为交易日 ──
     latest_date = hist["date"].max()
@@ -257,32 +259,18 @@ def main():
         logger.info(f"迁移：重建策略理论账本 {len(state['cycle_buys'])} 笔买入")
         save_state(state)
 
-    # ── Step 2.4：轮次重置（引擎自身已全清仓 → 自动开启新一轮，不看用户 ledger）──
+    # ── Step 2.4：轮次重置（旧规则遗留：MA120 清仓后 exited=True → 开启新一轮，不看用户 ledger）──
+    # 2026-11 起改为年线规则：新一轮由引擎在"已按年线卖出空仓 + PB 分位重新跌破 20%"当天自行开启，
+    # 不再经过这里。保留此段只为兼容旧状态。
     _pos = theoretical_position(state, total_fen)
     if state.get("exited") and _pos["current_fen"] == 0 and _pos["total_bought"] > 0:
         old_cycle  = state.get("cycle_id", 1)
         last_trade = state.get("exit_date") or today_str
         new_start  = (datetime.strptime(last_trade, "%Y-%m-%d")
                       + timedelta(days=1)).strftime("%Y-%m-%d")
-        # 归档本轮理论账本（buys/sells）——总资产/净值/CAGR 跨轮连续的关键：
+        # 归档本轮理论账本（buys/sells/rebuys）——总资产/净值/CAGR 跨轮连续的关键：
         # build_theoretical_ledger 会把归档轮与当前轮拼接回放，落袋利润不因重置消失
-        state.setdefault("completed_cycles", []).append(
-            {"cycle_id": old_cycle, "start": cyc_start, "end": last_trade,
-             "avg": round(_pos["weighted_avg"], 2) if _pos["weighted_avg"] else None,
-             "buys":  list(state.get("cycle_buys") or []),
-             "sells": list(state.get("cycle_sells") or [])})
-        state.update({
-            "cycle_id": old_cycle + 1,
-            "cycle_start_date": new_start,
-            # 复利滚入：新一轮每份金额=建仓首笔买入日的全部资金÷150，事前未知
-            "fen_size": None,
-            "t1_fired": False, "t2_fired": False, "t3_fired": False,
-            "rightside_used": False, "armed": False, "timeout_armed": False,
-            "reduced": False, "reduce_armed": False,
-            "exited": False, "observation_entered": False, "exit_streak": 0,
-            "cycle_buys": [], "cycle_sold_fen": 0, "cycle_sells": [],
-            "last_weekly_week": None, "phase": "waiting",
-        })
+        start_new_cycle(state, new_start, last_trade, _pos["weighted_avg"])
         logger.info(f"上一轮(第{old_cycle}轮)已清仓，开启第{state['cycle_id']}轮，"
                     f"cycle_start_date={new_start}")
         if not args.no_push:
@@ -297,6 +285,7 @@ def main():
             'T1':'buy','T2':'buy','T3':'buy',
             'weekly_3':'buy','weekly_6':'buy','rightside':'buy',
             'reduce':'reduce','exit':'exit',
+            'trend_exit':'exit','rebuy':'buy',     # 年线卖出记作清仓、年线买回记作买入
         }
         used_rows = set()
         cleaned   = []
@@ -351,6 +340,10 @@ def main():
                         hist, build_theoretical_ledger(state), config).get("fen_value")
                 except Exception as _e:
                     logger.warning(f"每份金额计算失败（推送不带金额）: {_e}")
+                try:
+                    _signal_amounts(hist, state, config, today_str, signals)
+                except Exception as _e:
+                    logger.warning(f"年线卖出/买回金额计算失败（推送不带金额）: {_e}")
             if args.defer_push:
                 notify_payload["signals"] = signals
                 notify_payload["total_bought"] = ls.get("total_bought", 0)
@@ -380,7 +373,7 @@ def main():
         # Step 5：记录 pending signals + 永久触发日志（同日同类型去重）
         state.setdefault("trigger_log", [])
         for sig in signals:
-            if sig["type"] in ("enter_observation",):   # 这类无需用户操作
+            if sig["type"] in ("enter_observation", "new_cycle"):   # 这类无需用户操作
                 continue
             price_val = sig.get("price")
             entry = {
@@ -458,6 +451,24 @@ def main():
         except Exception as _e2:
             logger.error(f"健康状态持久化失败: {_e2}")
         raise
+
+
+def _signal_amounts(hist, state, config, today_str, signals):
+    """给年线卖出/买回信号补上金额（按规则账本测算）：
+    卖出 = 卖出前的持仓市值；买回 = 买回后与买回前的持仓市值之差。"""
+    if not any(s.get("type") in ("trend_exit", "rebuy") for s in signals):
+        return
+    events = build_theoretical_ledger(state)
+    if len(events) == 0:
+        return
+    after = calc_asset_totals(hist, events, config)
+    today_trend = (events["date"] == today_str) & events["action"].isin(["trend_exit", "rebuy"])
+    before = calc_asset_totals(hist, events[~today_trend], config)
+    for s in signals:
+        if s.get("type") == "trend_exit":
+            s["amount"] = round(before["position_value"])
+        elif s.get("type") == "rebuy":
+            s["amount"] = round(max(0.0, after["position_value"] - before["position_value"]))
 
 
 def _check_qieman_health(state, hist):

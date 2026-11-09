@@ -21,7 +21,7 @@ for _s in (sys.stdout, sys.stderr):
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.engine import Engine, recalc_from_ledger
+from src.engine import Engine, ensure_ma250
 import yaml
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -33,23 +33,33 @@ logger = logging.getLogger(__name__)
 # 仅加权均价随份数分布下移（第1轮 1363→1349，第2轮 2234→2231）。
 # 又注：2026-07 减仓阈值由 +100% 下调至 +80%（理由见操作手册4.2）——第1轮减仓
 # 由 2020-07-09@2758 前移至 2020-06-30@2438；止盈/T档均不受影响。
+# 再注：2026-11 牛市段规则改为年线 ±3%（手册 4.3/4.4）：武装后跌破年线×0.97 卖出全部剩余、
+# 站上年线×1.03 买回；本轮一直循环到"PB 分位武装后回到过 ≥20%、空仓时再跌破 20%"才开新一轮。
+# 第1轮的卖出由 MA120 掉头（2022-01-11@3056）改为跌破年线卖出线（2022-01-07@3097），
+# 之后没有买回，2023-04-24 PB 分位跌破 20% 开第2轮——T 档日期与旧金标准一致。
+# 第2轮 +80% 减半按现行阈值回放落在 2026-05-13（实盘当时阈值还是 +100%，2026-07 改规则后
+# 才在 2026-07-03 减半）；年线卖出 2026-09-04@3287；2026-10-30 开第3轮（T1）。
 GOLD = {
     1: {
         "T1": ("2018-06-19", 1547),
         "T2": ("2018-08-17", 1434),
         "T3": ("2018-10-16", 1217),
         "avg_approx": 1349,
-        "reduce": ("2020-06-30", 2438),
-        "exit":   ("2022-01-11", 3056),
+        "reduce":     ("2020-06-30", 2438),
+        "trend_exit": ("2022-01-07", 3097),
     },
     2: {
+        "new_cycle":  ("2023-04-24", 2301),
         "T1": ("2023-04-24", 2301),
         "T2": ("2023-04-25", 2259),
         "T3": ("2023-05-31", 2193),
         "avg_approx": 2231,
-        "still_holding_as_of": "2026-06-18",
-        "still_holding_price": 4252,
-        "float_profit_approx": 0.90,
+        "reduce":     ("2026-05-13", 4038),
+        "trend_exit": ("2026-09-04", 3287),
+    },
+    3: {
+        "new_cycle":  ("2026-10-30", 2414),
+        "T1": ("2026-10-30", 2414),
     },
 }
 
@@ -78,85 +88,33 @@ def run_backtest(hist: pd.DataFrame, config: dict,
         "signals_pending": [], "phase": "waiting",
     }
 
+    hist = ensure_ma250(hist.copy())   # 年线须用全部历史计算，再截取回放区间
     sub = hist[(hist["date"] >= start_date)]
     if end_date:
         sub = sub[sub["date"] <= end_date]
     sub = sub.sort_values("date").reset_index(drop=True)
 
     all_signals = []
-    cycle_rows = []   # 当前轮工作账本（喂给引擎；清仓后清空，模拟新一轮空账本）
     all_rows   = []   # 全程账本（用于返回与均价验证）
+    empty = pd.DataFrame(columns=["date", "action", "fen", "price", "note"])
+    ledger_action = {"T1": "buy", "T2": "buy", "T3": "buy", "weekly_6": "buy",
+                     "weekly_3": "buy", "rightside": "buy", "reduce": "reduce",
+                     "trend_exit": "trend_exit", "rebuy": "rebuy"}
 
     for _, row in sub.iterrows():
         today = str(row["date"])
-
-        # 为回测自动记账（不模拟用户填写，直接用当日收盘价）
-        sim_ledger = pd.DataFrame(cycle_rows,
-                                  columns=["date", "action", "fen", "price", "note"])
-
-        engine = Engine(config, state, sim_ledger, sub)
+        # 引擎只看自己的策略理论账本（新一轮也由引擎当天自行开启），回放不需要外部记账
+        engine = Engine(config, state, empty, sub)
         signals = engine.run_daily(today)
         state = engine.state  # 获取更新后的 state
 
         for sig in signals:
             stype = sig["type"]
-            price = sig.get("price", row["close"])
             fen   = sig.get("fen", 0)
-
-            if stype in ("T1", "T2", "T3", "weekly_6", "weekly_3", "rightside"):
-                if fen > 0:
-                    rec = {
-                        "date": today, "action": "buy",
-                        "fen": fen, "price": price,
-                        "note": sig.get("reason", stype),
-                    }
-                    cycle_rows.append(rec); all_rows.append(rec)
-            elif stype == "reduce":
-                rec = {
-                    "date": today, "action": "reduce",
-                    "fen": fen, "price": price,
-                    "note": sig.get("reason", "减仓50%"),
-                }
-                cycle_rows.append(rec); all_rows.append(rec)
-            elif stype == "exit":
-                # 清仓时把所有剩余卖出
-                sim_ledger2 = pd.DataFrame(cycle_rows,
-                                           columns=["date", "action", "fen", "price", "note"])
-                ls = recalc_from_ledger(sim_ledger2, total_fen)
-                exit_fen = ls["current_fen"]
-                if exit_fen > 0:
-                    rec = {
-                        "date": today, "action": "exit",
-                        "fen": exit_fen, "price": price,
-                        "note": sig.get("reason", "全部止盈"),
-                    }
-                    cycle_rows.append(rec); all_rows.append(rec)
-                # 清仓 → 新一轮空账本（实盘中清仓后重设150份）
-                cycle_rows = []
-                # 归档本轮理论账本（与 main.py 轮次重置一致），保证 --reset 写入的
-                # state 携带历史轮次，总资产/净值可跨轮回放
-                done = state.get("completed_cycles", [])
-                done.append({
-                    "cycle_id": state["cycle_id"], "start": None, "end": today,
-                    "avg": None,
-                    "buys":  list(state.get("cycle_buys") or []),
-                    "sells": list(state.get("cycle_sells") or []),
-                })
-                # 重置状态进入下一轮
-                state = {
-                    "cycle_id": state["cycle_id"] + 1,
-                    "cycle_start_date": None,
-                    # 复利滚入：新一轮每份=建仓首日总资金/150，事前未知
-                    "fen_size": None,
-                    "t1_fired": False, "t2_fired": False, "t3_fired": False,
-                    "rightside_used": False,
-                    "armed": False, "reduced": False, "reduce_armed": False, "exited": False,
-                    "observation_entered": False, "exit_streak": 0,
-                    "cycle_buys": [], "cycle_sold_fen": 0, "cycle_sells": [],
-                    "signals_pending": [], "phase": "waiting",
-                    "completed_cycles": done,
-                }
-
+            if stype in ledger_action and fen > 0:
+                all_rows.append({"date": today, "action": ledger_action[stype], "fen": fen,
+                                 "price": sig.get("price", row["close"]),
+                                 "note": sig.get("reason", stype)})
             all_signals.append((today, sig))
 
         if signals:
@@ -192,35 +150,43 @@ def validate_gold_standard(all_signals: list, ledger_sim: pd.DataFrame,
         if not ok:
             passed = False
 
-    # 提取信号日期。cycle 以 exit 为界：一轮 = 从开始到 exit（含 exit）。
+    # 提取信号日期。轮次以 new_cycle 为界：new_cycle 当天及之后的信号属于新一轮。
     def first_signal(sig_types, cycle=None):
         types = sig_types if isinstance(sig_types, (list, tuple)) else [sig_types]
-        exits_seen = 0
+        cyc = 1
         for d, s in all_signals:
-            this_cycle = exits_seen + 1   # 当前信号所属轮次
-            if s["type"] in types and (cycle is None or this_cycle == cycle):
+            if s["type"] == "new_cycle":
+                cyc += 1
+            if s["type"] in types and (cycle is None or cyc == cycle):
                 return d
-            if s["type"] == "exit":
-                exits_seen += 1
         return None
 
-    # ── 第1轮 ──
-    print("\n▶ 第1轮")
-    check("T1", first_signal("T1", 1), GOLD[1]["T1"][0])
-    check("T2", first_signal("T2", 1), GOLD[1]["T2"][0])
-    check("T3", first_signal("T3", 1), GOLD[1]["T3"][0])
-    check("减仓", first_signal("reduce", 1), GOLD[1]["reduce"][0])
-    check("全清仓", first_signal("exit", 1), GOLD[1]["exit"][0])
+    def count_signals(sig_type, cycle):
+        cyc, n = 1, 0
+        for d, s in all_signals:
+            if s["type"] == "new_cycle":
+                cyc += 1
+            if s["type"] == sig_type and cyc == cycle:
+                n += 1
+        return n
 
-    # ── 第2轮 ──
-    print("\n▶ 第2轮")
-    check("T1", first_signal("T1", 2), GOLD[2]["T1"][0])
-    check("T2", first_signal("T2", 2), GOLD[2]["T2"][0])
-    check("T3", first_signal("T3", 2), GOLD[2]["T3"][0])
+    labels = {"new_cycle": "开新一轮", "T1": "T1", "T2": "T2", "T3": "T3",
+              "reduce": "减仓一半", "trend_exit": "年线卖出"}
+    for cyc in sorted(GOLD):
+        print(f"\n▶ 第{cyc}轮")
+        for key in ("new_cycle", "T1", "T2", "T3", "reduce", "trend_exit"):
+            if key in GOLD[cyc]:
+                check(labels[key], first_signal(key, cyc), GOLD[cyc][key][0])
+        nb = count_signals("rebuy", cyc)
+        print(f"  · 本轮年线买回 {nb} 次（这两轮的历史里卖出后都没有站回买回线）")
+        if cyc in (1, 2) and nb != 0:
+            print("  ✗ 预期 0 次")
+            passed = False
 
     # 加权均价验证
     rows_c2 = ledger_sim[
         (ledger_sim["date"] >= GOLD[2]["T1"][0]) &
+        (ledger_sim["date"] < GOLD[3]["T1"][0]) &
         (ledger_sim["action"] == "buy")
     ]
     if len(rows_c2):

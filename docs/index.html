@@ -246,6 +246,7 @@
   .chart-legend { display:flex; gap:14px; align-items:center; }
   .legend-item { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--text2); }
   .legend-dot { width:8px; height:8px; border-radius:50%; }
+  .legend-dash { width:12px; height:0; border-top:2px dashed; }
 
   .chart-row {
     display:grid; grid-template-columns:1fr 1fr;
@@ -744,7 +745,9 @@
         <span class="chart-title">创业板指 · 价格走势</span>
         <div class="chart-legend">
           <span class="legend-item"><span class="legend-dot" style="background:#1d1d1f"></span>收盘价</span>
-          <span class="legend-item"><span class="legend-dot" style="background:#8e54d6"></span>MA120</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#8e54d6"></span>年线 MA250</span>
+          <span class="legend-item" title="武装后：收盘跌破这条线卖出全部剩余创业板"><span class="legend-dash" style="border-color:#e0392b"></span>卖出线 ×0.97</span>
+          <span class="legend-item" title="年线卖出后：收盘站上这条线买回"><span class="legend-dash" style="border-color:#11a64a"></span>买回线 ×1.03</span>
           <span class="legend-item"><span class="legend-dot" style="background:#11a64a"></span>买入</span>
           <span class="legend-item"><span class="legend-dot" style="background:#e08600"></span>减仓</span>
           <span class="legend-item"><span class="legend-dot" style="background:#e0392b"></span>清仓</span>
@@ -1048,9 +1051,15 @@ function fmtWan(v) {
 // 总资产大卡底部：按当前阶段给出状态描述（份数/减仓/清仓皆自动判断）
 function phaseText(s) {
   const fen = s.current_fen || 0, total = s.total_fen || 150;
+  const t = s.trend || {};
+  if (t.out) {
+    const sold = t.sell_date ? `${t.sell_date} 已按年线卖出` : '已按年线卖出';
+    const back = t.buy_line ? `，收盘站上 ${Math.round(t.buy_line)} 买回 ${t.out_fen || ''} 份` : '';
+    return sold + back;
+  }
   if (fen <= 0) {
     return (s.has_exited || (s.completed_cycles || 0) > 0)
-      ? '已全部止盈，等待下次熊市'
+      ? '已全部卖出，等待下一轮建仓'
       : '空仓，等待下次熊市建仓';
   }
   if (fen >= total) return '目前满仓创业板';
@@ -1114,8 +1123,8 @@ function renderKPIs(d) {
   // 副行：已止盈落袋（减/清仓后）+ 你的实盘浮盈（仅小字对照，不影响上面任何数字与信号）
   const pyEl = document.getElementById('kpi-profit-yuan');
   const pyParts = [];
-  if ((s.has_reduced || s.has_exited) && s.banked_cash != null) {
-    pyParts.push('已止盈落袋 ¥' + fmtWan(s.banked_cash));
+  if ((s.has_reduced || s.has_exited || (s.trend && s.trend.out)) && s.banked_cash != null) {
+    pyParts.push('已卖出落袋 ¥' + fmtWan(s.banked_cash));
   }
   if (s.actual_float_profit != null) {
     pyParts.push('实盘 ' + pct(s.actual_float_profit) + '（仅参考）');
@@ -1222,13 +1231,15 @@ function renderActionBanner(d) {
   const pending = (d?.status?.pending_signals_list || []).filter(s => !isSignalActed(s));
   if (!pending.length) { banner.style.display = 'none'; return; }
 
-  // 按优先级排序：清仓 > 减仓 > T3 > T2 > T1 > 右侧 > 周定投
-  const ORDER = { exit:0, reduce:1, T3:2, T2:3, rightside:4, T1:5, weekly_6:6, weekly_3:7 };
+  // 按优先级排序：年线卖出/清仓 > 减仓 > 年线买回 > T3 > T2 > T1 > 右侧 > 周定投
+  const ORDER = { trend_exit:0, exit:0, reduce:1, rebuy:2, T3:3, T2:4, rightside:5, T1:6, weekly_6:7, weekly_3:8 };
   const sorted = [...pending].sort((a, b) => (ORDER[a.type] ?? 9) - (ORDER[b.type] ?? 9));
   const top   = sorted[0];
   const extra = pending.length - 1;
 
   const CMD = {
+    trend_exit: '请卖出全部剩余创业板（跌破年线 ×0.97）',
+    rebuy:      '请买回创业板（站上年线 ×1.03）',
     exit:     '请立即全部清仓',
     reduce:   '请立即减仓一半',
     T1:       '请立即买入（T1 建仓）',
@@ -1238,7 +1249,7 @@ function renderActionBanner(d) {
     weekly_3: '本周请买入（周定投）',
     rightside:'请立即右侧补仓',
   };
-  const isSell = top.type === 'reduce' || top.type === 'exit';
+  const isSell = isSellType(top.type);
   const icon   = isSell ? '🔴' : '📈';
   const cmd    = CMD[top.type] || top.type;
   const detail = [
@@ -1717,12 +1728,15 @@ function setupChartExtras(card, chart, dates) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 图表1：价格 + MA120 + 买卖标记
+// 图表1：价格 + 年线（卖出线 ×0.97 / 买回线 ×1.03）+ 买卖标记
 // ═══════════════════════════════════════════════════════════
 function renderChartPrice(d) {
   const chart = echarts.init(document.getElementById('chart-price'), null,
                               { renderer: 'canvas' });
-  const dates = d.dates, close = d.close, ma120 = d.ma120;
+  const dates = d.dates, close = d.close;
+  const ma250 = d.ma250 || [];
+  const sellLine = ma250.map(v => v == null ? null : +(v * 0.97).toFixed(2));
+  const buyLine  = ma250.map(v => v == null ? null : +(v * 1.03).toFixed(2));
 
   // 买卖散点
   function makeScatter(signals, color, symbol, size) {
@@ -1782,11 +1796,23 @@ function renderChartPrice(d) {
           ])
         },
       },
-      // MA120
+      // 年线 MA250（武装后的卖出 / 买回都以它为准）
       {
-        name:'MA120', type:'line', data:ma120,
+        name:'年线 MA250', type:'line', data:ma250,
         smooth:false, symbol:'none', z:6,
         lineStyle:{ color:C.purple, width:1.5, type:'solid' },
+      },
+      // 卖出线 = 年线 × 0.97（武装后跌破即卖出全部剩余）
+      {
+        name:'卖出线 ×0.97', type:'line', data:sellLine,
+        smooth:false, symbol:'none', z:6,
+        lineStyle:{ color:C.red, width:1, type:'dashed', opacity:.75 },
+      },
+      // 买回线 = 年线 × 1.03（年线卖出后站上即买回）
+      {
+        name:'买回线 ×1.03', type:'line', data:buyLine,
+        smooth:false, symbol:'none', z:6,
+        lineStyle:{ color:C.green, width:1, type:'dashed', opacity:.75 },
       },
       // 买入标记
       makeScatter(d.buy_signals,   C.green,  'triangle',  12),
@@ -2241,6 +2267,8 @@ function markSignalActed(sig) {
 function isSignalActed(sig) {
   return getActedSignals().includes(sig.type + '_' + sig.date);
 }
+// 卖出类信号：减仓一半 / 年线卖出 / 旧规则清仓
+function isSellType(t) { return t === 'reduce' || t === 'exit' || t === 'trend_exit'; }
 
 // FAB 徽标
 function updateFabBadge() {
@@ -2260,6 +2288,8 @@ function renderPendingSignals() {
     return;
   }
   const typeLabel = {
+    trend_exit: '请卖出全部剩余创业板（跌破年线 ×0.97）',
+    rebuy:      '请买回创业板（站上年线 ×1.03）',
     exit:     '请立即全部清仓',
     reduce:   '请立即减仓一半',
     T1:       '请立即买入（T1 建仓）',
@@ -2270,10 +2300,11 @@ function renderPendingSignals() {
     rightside:'请立即右侧补仓',
   };
   list.innerHTML = signals.map(s => {
-    const isSell = s.type === 'reduce' || s.type === 'exit';
+    const isSell = isSellType(s.type);
+    const strong = isSell || s.type === 'rebuy';   // 卖出类与年线买回：强提醒、不过期
     return `
     <div class="pending-card${isSell ? ' sell' : ''}" data-sig='${JSON.stringify(s).replace(/'/g,"&apos;")}'>
-      <div class="pc-type">${typeLabel[s.type]||s.type}${isSell ? '<span class="pc-urgent">强提醒 · 不过期</span>' : ''}</div>
+      <div class="pc-type">${typeLabel[s.type]||s.type}${strong ? '<span class="pc-urgent">强提醒 · 不过期</span>' : ''}</div>
       <div class="pc-detail">${esc(s.reason)}</div>
       <div class="pc-meta">信号日期 ${s.date} · 建议 ${s.fen} 份 · 参考点位 ${s.price?.toFixed(0)||'--'}</div>
       <button class="btn-sm btn-fill-sm" onclick="prefillForm(this)">记录我的成交</button>
@@ -2310,7 +2341,8 @@ function prefillForm(btn) {
   _activePendingSignal = sig;
   const sigDate = sig.date || new Date().toISOString().slice(0,10);
   document.getElementById('f-date').value   = sigDate;
-  document.getElementById('f-action').value = sig.type.startsWith('weekly')||['T1','T2','T3','rightside'].includes(sig.type) ? 'buy' : sig.type==='reduce' ? 'reduce' : 'exit';
+  // 年线买回记作买入、年线卖出记作清仓（卖出全部剩余）
+  document.getElementById('f-action').value = sig.type.startsWith('weekly')||['T1','T2','T3','rightside','rebuy'].includes(sig.type) ? 'buy' : sig.type==='reduce' ? 'reduce' : 'exit';
   document.getElementById('f-fen').value    = sig.fen || '';
   document.getElementById('f-note').value   = sig.reason || sig.type;
   autofillPrice(sigDate);
@@ -2425,12 +2457,13 @@ function renderTriggerLog() {
   const typeLabel = {
     T1:'T1 一次性买入', T2:'T2 一次性买入', T3:'T3 满仓买入',
     weekly_6:'周定投（6份）', weekly_3:'周定投（3份）',
-    rightside:'右侧补仓', reduce:'减仓 50%', exit:'全部清仓',
+    rightside:'右侧补仓', reduce:'减仓 50%', exit:'全部清仓（旧规则 MA120）',
+    trend_exit:'年线卖出（全部剩余）', rebuy:'年线买回',
   };
   const typeAction = {
     T1:'buy', T2:'buy', T3:'buy',
-    weekly_6:'buy', weekly_3:'buy', rightside:'buy',
-    reduce:'reduce', exit:'exit',
+    weekly_6:'buy', weekly_3:'buy', rightside:'buy', rebuy:'buy',
+    reduce:'reduce', exit:'exit', trend_exit:'exit',
   };
   const trades = LM.merged();
   list.innerHTML = log.map(entry => {

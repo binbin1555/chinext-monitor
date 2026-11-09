@@ -65,7 +65,11 @@ def build_nav_series(hist: pd.DataFrame, ledger: pd.DataFrame,
                 cash     -= amount
                 holdings += amount / price   # 购入的指数份额（点为单位）
                 held_fen += fen
-            elif action in ("reduce", "exit"):
+            elif action == "rebuy":
+                # 年线买回：买回到卖出前的仓位比例（份数/总份数 × 当时总资产）
+                cash, holdings = _apply_rebuy(cash, holdings, fen, price, total_fen)
+                held_fen += fen
+            elif action in ("reduce", "exit", "trend_exit"):
                 # 按"卖出前持仓份数"的比例卖出对应份额（分母必须是卖出前的持仓）
                 if held_fen > 0:
                     sell_shares = holdings * (min(fen, held_fen) / held_fen)
@@ -103,37 +107,50 @@ def build_nav_series(hist: pd.DataFrame, ledger: pd.DataFrame,
     return result
 
 
+def _apply_rebuy(cash: float, holdings: float, fen: int, price: float, total_fen: int):
+    """年线买回：把创业板仓位补到【买回份数 / 总份数】× 当时总资产
+    （没减过半 = 全部资金，减过半 = 总资产的一半）。返回 (cash, holdings)。"""
+    if not price or total_fen <= 0:
+        return cash, holdings
+    total_now = cash + holdings * price
+    target = total_now * (fen / float(total_fen))
+    amt = max(0.0, target - holdings * price)
+    return cash - amt, holdings + amt / price
+
+
 def build_theoretical_ledger(state: dict) -> pd.DataFrame:
     """
     从【策略理论账本】构造买卖流水，供净值/总资产按规则计算——与用户是否
     手动记账无关。列：date, action, fen, price。
-    包含【已归档的历史轮次】(completed_cycles[*].buys/sells) + 当前轮
-    (cycle_buys/cycle_sells)：轮次重置后总资产/净值才能跨轮连续，
+    包含【已归档的历史轮次】(completed_cycles[*].buys/sells/rebuys) + 当前轮
+    (cycle_buys/cycle_sells/cycle_rebuys)：轮次重置后总资产/净值才能跨轮连续，
     已止盈落袋的利润不会因开新轮而从账上消失。
+    action：buy（阶梯买入）/ reduce（减半）/ trend_exit（年线卖出）/ rebuy（年线买回）
+            / exit（2026-11 之前旧规则的 MA120 清仓，仅历史记录）。
+    同一天多笔按 买入 → 卖出 → 买回 的顺序回放（与引擎当日的判断顺序一致）。
     """
     rows = []
 
-    def _add_buy(b):
-        rows.append({"date": str(b.get("date")), "action": "buy",
-                     "fen": int(b.get("fen", 0)), "price": float(b.get("price", 0) or 0)})
+    def _add(d, action, fen, price, order):
+        rows.append({"date": str(d), "action": action, "fen": int(fen or 0),
+                     "price": float(price or 0), "_o": order})
 
-    def _add_sell(s):
-        rows.append({"date": str(s.get("date")), "action": s.get("action", "reduce"),
-                     "fen": int(s.get("fen", 0)), "price": float(s.get("price", 0) or 0)})
+    def _add_cycle(buys, sells, rebuys):
+        for b in (buys or []):
+            _add(b.get("date"), "buy", b.get("fen"), b.get("price"), 0)
+        for s in (sells or []):
+            _add(s.get("date"), s.get("action", "reduce"), s.get("fen"), s.get("price"), 1)
+        for r in (rebuys or []):
+            _add(r.get("date"), "rebuy", r.get("fen"), r.get("price"), 2)
 
     for cyc in (state.get("completed_cycles") or []):
-        for b in (cyc.get("buys") or []):
-            _add_buy(b)
-        for s in (cyc.get("sells") or []):
-            _add_sell(s)
-    for b in (state.get("cycle_buys") or []):
-        _add_buy(b)
-    for s in (state.get("cycle_sells") or []):
-        _add_sell(s)
+        _add_cycle(cyc.get("buys"), cyc.get("sells"), cyc.get("rebuys"))
+    _add_cycle(state.get("cycle_buys"), state.get("cycle_sells"), state.get("cycle_rebuys"))
 
     if not rows:
         return pd.DataFrame(columns=["date", "action", "fen", "price"])
-    return pd.DataFrame(rows).sort_values("date", kind="stable").reset_index(drop=True)
+    df = pd.DataFrame(rows).sort_values(["date", "_o"], kind="stable").reset_index(drop=True)
+    return df.drop(columns=["_o"])
 
 
 def calc_asset_totals(hist: pd.DataFrame, events: pd.DataFrame, config: dict) -> dict:
@@ -178,7 +195,9 @@ def calc_asset_totals(hist: pd.DataFrame, events: pd.DataFrame, config: dict) ->
             amt = fen * (per_fen if per_fen else initial_cap / total_fen)
             if a == "buy":
                 cash -= amt; holdings += (amt / pr if pr else 0); held += fen
-            elif a in ("reduce", "exit"):
+            elif a == "rebuy":
+                cash, holdings = _apply_rebuy(cash, holdings, fen, pr, total_fen); held += fen
+            elif a in ("reduce", "exit", "trend_exit"):
                 ss = holdings * (min(fen, held) / held) if held > 0 else 0.0
                 cash += ss * pr; holdings -= ss; held = max(0, held - fen)
         cash *= (1 + ((1 + cash_rate) ** (1 / 252) - 1))
@@ -343,17 +362,65 @@ def calc_gaps(hist: pd.DataFrame, today_str: str, state: dict,
     pb_pct  = row["pb_pct10y"] if not pd.isna(row["pb_pct10y"]) else None
     pe_pct  = row["pe_pct10y"] if not pd.isna(row["pe_pct10y"]) else None
     close   = row["close"]     if not pd.isna(row["close"])     else None
-    ma120   = row["ma120"]     if not pd.isna(row["ma120"])     else None
     total_fen = config.get("total_fen", 150)
 
-    # 缺口（距减仓/距止盈）基于【策略理论账本】，与引擎信号时机口径一致
-    from src.engine import theoretical_position
+    # 缺口（距减仓/距卖出/距买回）基于【策略理论账本】，与引擎信号时机口径一致
+    from src.engine import theoretical_position, ensure_ma250, trend_lines
+    ensure_ma250(hist)
+    ma250 = row["ma250"] if "ma250" in row.index and not pd.isna(row["ma250"]) else None
+    if ma250 is None:
+        _m = hist.loc[hist["date"] == today_str, "ma250"]
+        ma250 = float(_m.iloc[0]) if len(_m) and not pd.isna(_m.iloc[0]) else None
+    sell_line, buy_line = trend_lines(ma250)
     ls = theoretical_position(state, total_fen)
     fp = (float(close) / ls.get("weighted_avg") - 1
           if ls.get("weighted_avg") and close else None)
+    trend_out = bool(state.get("trend_out"))
 
     def clamp01(x):
         return round(max(0.0, min(1.0, x)), 3)
+
+    # ── 年线卖出后：等待买回 / 等待下一轮（二者谁先到按谁）──
+    if trend_out and close:
+        back_fen = int(state.get("trend_out_fen", 0) or 0)
+        sold_txt = (f"{state.get('trend_sell_date')} 已在 {float(state.get('trend_sell_price')):.0f} 点按年线卖出"
+                    if state.get("trend_sell_date") and state.get("trend_sell_price") else "已按年线卖出")
+        if buy_line is not None:
+            rise = (buy_line - float(close)) / float(close)
+            gaps.append({
+                "name": "年线买回",
+                "big": f"+{rise*100:.1f}%" if rise > 0 else "已满足",
+                "headline": (f"点位再涨 {rise*100:.1f}%（站上年线 × 1.03 = {buy_line:.0f}），买回 {back_fen} 份"
+                             if rise > 0 else f"已站上年线买回线 {buy_line:.0f}，请买回 {back_fen} 份"),
+                "note": f"{sold_txt}；买回到卖出前的仓位（减过半就只买回一半）",
+                "current": f"收盘 {float(close):.0f} / 年线 {ma250:.0f} / 买回线 {buy_line:.0f}",
+                "progress": clamp01(1 - rise) if rise > 0 else 1.0,
+                "tone": "up",
+            })
+        if pb_pct is not None:
+            if state.get("pb_reset_seen"):
+                drop_pp = (pb_pct - 0.20) * 100
+                gaps.append({
+                    "name": "下一轮 T1",
+                    "big": f"{drop_pp:.1f}%" if drop_pp > 0 else "已满足",
+                    "headline": (f"PB 分位再降 {drop_pp:.1f}%，本轮结束，开启下一轮（T1 买 10 份）"
+                                 if drop_pp > 0 else "PB 分位已低于 20%，开启下一轮"),
+                    "note": "本轮卖出后若一直没站回买回线，PB 分位跌破 20% 就按新一轮重新建仓",
+                    "current": f"当前 PB 分位 {pb_pct*100:.1f}%，目标 <20%",
+                    "progress": clamp01(1 - (pb_pct - 0.20) / 0.80),
+                    "tone": "down",
+                })
+            else:
+                gaps.append({
+                    "name": "下一轮 T1",
+                    "big": "待 PB 回升",
+                    "headline": "下一轮要等 PB 分位先回到 20% 以上、再跌破 20%",
+                    "note": "本轮武装后 PB 分位一直低于 20%，暂不开启新一轮",
+                    "current": f"当前 PB 分位 {pb_pct*100:.1f}%",
+                    "progress": 0.0,
+                    "tone": "neutral",
+                })
+        return gaps
 
     # ── 买入侧 T1 / T2 / T3 ──
     buy_levels = [
@@ -415,52 +482,40 @@ def calc_gaps(hist: pd.DataFrame, today_str: str, state: dict,
                     "tone": "up",
                 })
 
-        # 已武装：全部清仓
-        if state.get("armed") and ma120 is not None and close:
-            from src.engine import count_exit_streak
-            streak = count_exit_streak(hist, today_str)
-            # MA120 方向（与引擎清仓口径一致：当日 MA120 < 20 个交易日前的 MA120）
-            _sub = hist[hist["date"] <= today_str]
-            ma120_past = (float(_sub["ma120"].iloc[-21])
-                          if len(_sub) >= 21 and not pd.isna(_sub["ma120"].iloc[-21])
-                          else None)
-            ma_falling = ma120_past is not None and float(ma120) < ma120_past
-            below = close < float(ma120)
-            cond_txt = (f"①收盘<MA120：{'✓' if below else '✗'}（{close:.0f} / {ma120:.0f}）　"
-                        + (f"②MA120下行：{'✓' if ma_falling else '✗'}"
-                           f"（{ma120:.0f} vs 20日前 {ma120_past:.0f}）"
-                           if ma120_past is not None else "②MA120下行：数据不足"))
-            if below and ma_falling:
-                days_left = max(0, 3 - streak)
+        # 武装前：距武装（+35%）——武装后才启用年线卖出规则
+        if not state.get("armed") and fp < 0.35:
+            rise = (0.35 - fp) / (1.0 + fp)
+            gaps.append({
+                "name": "武装",
+                "big": f"+{rise*100:.1f}%",
+                "headline": f"点位再涨 {rise*100:.1f}%，浮盈到 35% 后武装",
+                "note": "武装前只拿不卖；武装后跌破年线 × 0.97 才卖出",
+                "current": f"当前浮盈 {fp*100:.1f}%，目标 35%",
+                "progress": clamp01((1.0 + fp) / 1.35),
+                "tone": "up",
+            })
+
+        # 已武装：年线卖出（跌破年线 × 0.97 卖出全部剩余）
+        if state.get("armed") and sell_line is not None and close:
+            fall = (float(close) - sell_line) / float(close)
+            if fall > 0:
                 gaps.append({
-                    "name": "全部清仓",
-                    "big": f"{days_left} 天" if days_left > 0 else "已满足",
-                    "headline": (f"两条件均满足，再持续 {days_left} 天触发全部清仓"
-                                 if days_left > 0 else "已连续 3 日满足，可全部清仓"),
-                    "note": cond_txt,
-                    "current": f"已连续 {streak} 日同时满足 / 需 3 日",
-                    "progress": clamp01(streak / 3.0),
-                    "tone": "warn",
-                })
-            elif below:
-                gaps.append({
-                    "name": "全部清仓",
-                    "big": "计日未启动",
-                    "headline": "已跌破 MA120，但 MA120 仍在上行——3 日计数尚未开始",
-                    "note": cond_txt + "　两条件同时满足的当日起才开始计数",
-                    "current": f"已连续 {streak} 日同时满足 / 需 3 日",
-                    "progress": clamp01(streak / 3.0),
+                    "name": "年线卖出",
+                    "big": f"{fall*100:.1f}%",
+                    "headline": f"点位再跌 {fall*100:.1f}%（跌破年线 × 0.97 = {sell_line:.0f}），卖出全部剩余创业板",
+                    "note": "卖出后收盘站上年线 × 1.03 再买回",
+                    "current": f"收盘 {float(close):.0f} / 年线 {ma250:.0f} / 卖出线 {sell_line:.0f}",
+                    "progress": clamp01(1 - fall),
                     "tone": "down",
                 })
             else:
-                fall = (float(close) - float(ma120)) / float(close)
                 gaps.append({
-                    "name": "全部清仓",
-                    "big": f"{fall*100:.1f}%",
-                    "headline": f"点位再跌 {fall*100:.1f}%（跌破 MA120），准备全部清仓",
-                    "note": ("跌破后需 MA120 同时下行才开始 3 日计数　" + cond_txt),
-                    "current": f"收盘 {close:.0f} / MA120 {ma120:.0f}",
-                    "progress": clamp01(1 - fall),
+                    "name": "年线卖出",
+                    "big": "已满足",
+                    "headline": f"已跌破年线卖出线 {sell_line:.0f}，请卖出全部剩余创业板",
+                    "note": "卖出后收盘站上年线 × 1.03 再买回",
+                    "current": f"收盘 {float(close):.0f} / 年线 {ma250:.0f} / 卖出线 {sell_line:.0f}",
+                    "progress": 1.0,
                     "tone": "down",
                 })
 
@@ -506,7 +561,7 @@ def calc_gaps(hist: pd.DataFrame, today_str: str, state: dict,
                 "name": "止盈观察期",
                 "big": best["big"],
                 "headline": best["headline"],
-                "note": "三条路径满足任一即进入；进入后才武装止盈",
+                "note": "三条路径满足任一即进入；只是提示，不触发买卖",
                 "current": best["current"],
                 "progress": clamp01(best["prog"]),
                 "tone": "neutral",

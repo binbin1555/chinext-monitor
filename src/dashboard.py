@@ -109,6 +109,8 @@ def generate_data_json(
     """将所有仪表盘所需数据序列化为 docs/data.json。"""
 
     start_date = config.get("start_date", "2023-01-01")
+    from src.engine import ensure_ma250, trend_lines
+    ensure_ma250(hist)   # 年线（牛市段卖出/买回线的基准）
     # 仪表盘只展示 start_date 以来的数据（约 3 年），避免数据量过大
     view = hist[hist["date"] >= start_date].copy().reset_index(drop=True)
 
@@ -117,6 +119,8 @@ def generate_data_json(
     ma20_arr  = [NaN_SAFE(v) for v in view["ma20"].tolist()]
     ma60_arr  = [NaN_SAFE(v) for v in view["ma60"].tolist()]
     ma120_arr = [NaN_SAFE(v) for v in view["ma120"].tolist()]
+    ma250_arr = [round(v, 2) if v is not None else None
+                 for v in (NaN_SAFE(x) for x in view["ma250"].tolist())]
     pb_arr    = [NaN_SAFE(v) for v in view["pb"].tolist()]
     pe_arr    = [NaN_SAFE(v) for v in view["pe_ttm"].tolist()]
     pb_pct    = [NaN_SAFE(v) for v in view["pb_pct10y"].tolist()]
@@ -148,12 +152,17 @@ def generate_data_json(
         close_at = view.loc[view["date"] == d, "close"].values
         price    = float(close_at[0]) if len(close_at) else float(row["price"])
         action   = str(row["action"]).lower()
+        fen      = int(row["fen"])
         if action == "buy":
-            buy_signals.append({"date": d, "value": price, "fen": int(row["fen"]), "note": ""})
+            buy_signals.append({"date": d, "value": price, "fen": fen, "note": f"阶梯买入 {fen} 份"})
+        elif action == "rebuy":
+            buy_signals.append({"date": d, "value": price, "fen": fen, "note": f"年线买回 {fen} 份"})
         elif action == "reduce":
-            reduce_signals.append({"date": d, "value": price})
+            reduce_signals.append({"date": d, "value": price, "note": f"减仓一半 {fen} 份"})
+        elif action == "trend_exit":
+            exit_signals.append({"date": d, "value": price, "note": f"年线卖出 {fen} 份"})
         elif action == "exit":
-            exit_signals.append({"date": d, "value": price})
+            exit_signals.append({"date": d, "value": price, "note": f"MA120 清仓 {fen} 份（旧规则）"})
 
     # ── 当前状态摘要 ──
     # th = 策略理论账本（驱动信号/缺口）；ls = 用户实盘账本（仅显示实际盈亏，不参与信号）
@@ -165,13 +174,32 @@ def generate_data_json(
     cur_close = float(today_row["close"]) if today_row is not None and not pd.isna(today_row["close"]) else None
     def _fp(avg):
         return round(cur_close / avg - 1, 4) if avg and cur_close else None
-    float_profit = _fp(th.get("weighted_avg"))   # 策略理论浮盈（驱动信号）
+    # 策略理论浮盈（驱动信号）；按年线卖出后手里没有创业板，不显示浮盈
+    float_profit = _fp(th.get("weighted_avg")) if th.get("current_fen", 0) > 0 else None
     actual_fp    = _fp(ls.get("weighted_avg"))   # 用户实盘浮盈（仅显示）
 
     phase_label = {
-        "waiting": "空仓等待",
-        "holding": "建仓 / 持有中",
+        "waiting":   "空仓等待",
+        "holding":   "建仓 / 持有中",
+        "trend_out": "年线卖出 · 等待买回",
     }.get(state.get("phase", ""), state.get("phase", ""))
+
+    # 年线（牛市段卖出 / 买回）：最新一天的年线与两条线
+    cur_ma250 = NaN_SAFE(float(today_row["ma250"])) if (today_row is not None and "ma250" in today_row.index
+                                                       and not pd.isna(today_row["ma250"])) else None
+    sell_line, buy_line = trend_lines(cur_ma250)
+    trend_json = {
+        "ma250":         round(cur_ma250, 2) if cur_ma250 else None,
+        "sell_line":     round(sell_line, 2) if sell_line else None,
+        "buy_line":      round(buy_line, 2) if buy_line else None,
+        "active":        bool(state.get("armed")),       # 武装后年线规则才生效
+        "out":           bool(state.get("trend_out")),   # 已按年线卖出、等待买回
+        "out_fen":       int(state.get("trend_out_fen", 0) or 0),
+        "sell_date":     state.get("trend_sell_date"),
+        "sell_price":    state.get("trend_sell_price"),
+        "pb_reset_seen": bool(state.get("pb_reset_seen")),
+        "rebought_fen":  th.get("total_rebought", 0),
+    }
 
     next_action = _next_action_hint(state, th, today_row, config)
 
@@ -210,6 +238,7 @@ def generate_data_json(
         "ma20":        ma20_arr,
         "ma60":        ma60_arr,
         "ma120":       ma120_arr,
+        "ma250":       ma250_arr,
         "pb":          pb_arr,
         "pe_ttm":      pe_arr,
         "pb_pct10y":   pb_pct,
@@ -253,7 +282,7 @@ def generate_data_json(
             "timeout_armed":      bool(state.get("timeout_armed")),
             "arming_deadline":    _arming_deadline(state, config),
             "observation_entered": state.get("observation_entered", False),
-            "exit_streak":        state.get("exit_streak", 0),
+            "trend":              trend_json,
             "t1_fired":           state.get("t1_fired", False),
             "t2_fired":           state.get("t2_fired", False),
             "t3_fired":           state.get("t3_fired", False),
@@ -319,6 +348,16 @@ def _next_action_hint(state, ledger_state, today_row, config) -> str:
         return "等待数据"
     pb_pct = NaN_SAFE(today_row.get("pb_pct10y") if hasattr(today_row, "get") else today_row["pb_pct10y"])
     phase  = state.get("phase", "waiting")
+    from src.engine import trend_lines
+    ma250 = NaN_SAFE(today_row.get("ma250")) if hasattr(today_row, "get") else None
+    sell_line, buy_line = trend_lines(ma250)
+
+    if phase == "trend_out" or state.get("trend_out"):
+        sold = (f"{state.get('trend_sell_date')} 已按年线卖出"
+                if state.get("trend_sell_date") else "已按年线卖出")
+        back = (f"收盘站上 {buy_line:.0f}（年线×1.03）买回" if buy_line else "站上年线×1.03 买回")
+        nxt = "，或 PB 分位 <20% 开启下一轮" if state.get("pb_reset_seen") else ""
+        return f"{sold}，等待{back}{nxt}"
 
     if phase == "waiting":
         if pb_pct is not None and pb_pct < 0.20:
@@ -332,13 +371,12 @@ def _next_action_hint(state, ledger_state, today_row, config) -> str:
             fp = close / ledger_state["weighted_avg"] - 1
 
     if state.get("armed"):
-        if state.get("exit_streak", 0) >= 1:
-            return f"⚠️ 止盈条件满足中（已{state['exit_streak']}天/需3天）"
+        line = f"收盘跌破 {sell_line:.0f}（年线×0.97）卖出全部剩余" if sell_line else "跌破年线×0.97 卖出全部剩余"
         if state.get("timeout_armed"):
-            return "已武装（超时视同武装，4.3.1），关注MA120方向"
-        return "已武装，关注MA120方向"
+            return f"已武装（超时视同武装，4.3.1），{line}"
+        return f"已武装，{line}"
     deadline = _arming_deadline(state, config)
     suffix = f"（未武装，{deadline} 起超时视同武装）" if deadline else ""
     if fp is not None:
-        return f"持有中，浮盈{fp*100:.1f}%，关注估值与均线{suffix}"
-    return f"持有中，等待止盈条件{suffix}"
+        return f"持有中，浮盈{fp*100:.1f}%，到 35% 武装后启用年线卖出{suffix}"
+    return f"持有中，等待武装{suffix}"

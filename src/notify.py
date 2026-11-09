@@ -24,6 +24,9 @@ SIGNAL_TYPE_LABELS = {
     "rightside":       "🟢 右侧补仓信号",
     "enter_observation": "🟡 进入止盈观察期",
     "reduce":          "🟠 减仓50%信号",
+    "trend_exit":      "🔴 年线卖出信号",
+    "rebuy":           "🟢 年线买回信号",
+    "new_cycle":       "🔄 开启新一轮",
     "exit":            "🔴 全部止盈信号",
 }
 
@@ -89,9 +92,18 @@ class BarkNotifier:
         if pb_pct is not None:
             body_lines.append(f"PB近10年分位: {pb_pct*100:.1f}%")
         if fen > 0:
-            body_lines.append(f"操作份数: {fen}份（已买{total_bought}/{total_fen}份）")
+            if sig_type in ("trend_exit", "rebuy"):
+                body_lines.append(f"操作份数: {fen}份")
+            else:
+                body_lines.append(f"操作份数: {fen}份（已买{total_bought}/{total_fen}份）")
             if fen_value and sig_type in BUY_TYPES:
                 body_lines.append(f"每份约 ¥{fen_value:,.0f}，本次买入约 ¥{fen * fen_value:,.0f}")
+            amount = signal.get("amount")
+            if amount and sig_type == "rebuy":
+                body_lines.append(f"本次买回约 ¥{amount:,.0f}（按规则账本的总资产测算）")
+            elif amount and sig_type == "trend_exit":
+                body_lines.append(f"本次卖出约 ¥{amount:,.0f}（按规则账本测算）")
+            body_lines.append("请在下一个交易日下单")
         body_lines.append(f"日期: {today_str}")
 
         self._send(
@@ -118,17 +130,22 @@ class BarkNotifier:
                           total_fen: int = 150):
         """每日日报：无论有无信号都发送，是系统心跳。"""
         phase_map = {
-            "waiting": "空仓等待",
-            "holding": "建仓/持有中",
+            "waiting":   "空仓等待",
+            "holding":   "建仓/持有中",
+            "trend_out": "年线卖出·等待买回",
         }
         phase = phase_map.get(state.get("phase", ""), state.get("phase", ""))
 
         close   = row_data.get("close")
         pb_pct  = row_data.get("pb_pct10y")
         pe_pct  = row_data.get("pe_pct10y")
-        ma120   = row_data.get("ma120")
+        ma250   = row_data.get("ma250")
         t300    = row_data.get("temp_300")
         t500    = row_data.get("temp_500")
+        try:
+            ma250 = float(ma250) if ma250 is not None and ma250 == ma250 else None   # NaN → None
+        except (TypeError, ValueError):
+            ma250 = None
 
         fp = None
         if ledger_state.get("weighted_avg") and close:
@@ -140,16 +157,26 @@ class BarkNotifier:
             "─" * 24,
         ]
         if close:
-            ma120_str = f"{ma120:.0f}" if ma120 else "N/A"
-            lines.append(f"创业板: {close:.0f}  MA120: {ma120_str}")
+            ma250_str = f"{ma250:.0f}" if ma250 else "N/A"
+            lines.append(f"创业板: {close:.0f}  年线: {ma250_str}")
+            if ma250 and state.get("trend_out"):
+                buy_line = ma250 * 1.03
+                lines.append(f"买回线 {buy_line:.0f}（年线×1.03），还差 {(buy_line/close-1)*100:+.1f}%")
+            elif ma250 and state.get("armed") and ledger_state.get("current_fen", 0) > 0:
+                sell_line = ma250 * 0.97
+                lines.append(f"卖出线 {sell_line:.0f}（年线×0.97），距离 {(sell_line/close-1)*100:+.1f}%")
+            elif ledger_state.get("current_fen", 0) > 0:
+                lines.append("未武装：浮盈到 35% 后才启用年线卖出")
         if pb_pct is not None:
             pe_str = f"{pe_pct*100:.1f}%" if pe_pct is not None else "N/A"
             lines.append(f"PB分位: {pb_pct*100:.1f}%  PE分位: {pe_str}")
         if t300 is not None:
             t500_str = f"{t500:.1f}" if t500 is not None else "N/A"
             lines.append(f"温度: 沪深300={t300:.1f}  中证500={t500_str}")
-        if fp is not None:
+        if fp is not None and ledger_state.get("current_fen", 0) > 0:
             lines.append(f"当前浮盈: {fp*100:.1f}%  持仓: {ledger_state.get('current_fen', 0)}/{total_fen}份")
+        elif state.get("trend_out"):
+            lines.append(f"持仓: 0/{total_fen}份（已按年线卖出，等待买回 {int(state.get('trend_out_fen', 0) or 0)} 份）")
         if metrics.get("cagr") is not None:
             lines.append(f"CAGR: {metrics['cagr']*100:.1f}%  回撤: {metrics.get('max_drawdown', 0)*100:.1f}%")
         if warnings:
